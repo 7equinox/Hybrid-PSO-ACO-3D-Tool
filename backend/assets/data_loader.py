@@ -46,6 +46,16 @@ class DataLoader:
         except FileNotFoundError as err:
             raise FileNotFoundError(f"Dataset file not found: {err}. Ensure the dataset path is correct.")
 
+    def _route_has_packages(self, dict_route_info):
+            """ 
+            Helper function to check if a route has any associated packages in its stops. 
+            """
+            if 'stops' in dict_route_info and isinstance(dict_route_info['stops'], dict):
+                for stop_data in dict_route_info['stops'].values():
+                    if 'package_ids' in stop_data and isinstance(stop_data['package_ids'], list) and stop_data['package_ids']:
+                        return True # Found a stop with a non-empty list of package_ids
+            return False
+
     def get_route_by_capacity(self, dict_routes, flt_capacity):
         """
         Finds the first route ID that matches the given vehicle capacity.
@@ -59,7 +69,8 @@ class DataLoader:
         """
         for str_route_id, dict_route_info in dict_routes.items():
             if float(dict_route_info['executor_capacity_cm3']) == flt_capacity:
-                return str_route_id
+                if self._route_has_packages(dict_route_info):
+                    return str_route_id
         return None
 
     def prepare_simulation_data(self, str_route_id, dict_routes, dict_packages):
@@ -88,8 +99,13 @@ class DataLoader:
             'capacity_cm3': dict_route_info['executor_capacity_cm3']
         }
         
-        # Get the list of package IDs for this route
-        arr_package_ids = list(dict_route_info['route_sequence'].keys())
+        # Get the list of package IDs by iterating through all stops in the route.
+        # The original code incorrectly looked for a 'route_sequence' key.
+        arr_package_ids = []
+        if 'stops' in dict_route_info and isinstance(dict_route_info['stops'], dict):
+            for stop_id, stop_data in dict_route_info['stops'].items():
+                if 'package_ids' in stop_data and isinstance(stop_data['package_ids'], list):
+                    arr_package_ids.extend(stop_data['package_ids'])
 
         # Filter the main package dictionary to get only the packages for this route
         arr_packages_for_route = []

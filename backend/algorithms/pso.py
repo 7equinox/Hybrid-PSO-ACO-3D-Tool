@@ -13,6 +13,7 @@ DELA CRUZ, JUAN GABRIEL D.
 ERFE, JEFFERSON B.
 ESTONILO, JULIUS EVAN C.
 """
+import random
 from py3dbp import Packer, Bin, Item
 
 class PSO:
@@ -57,6 +58,9 @@ class PSO:
         """
         Executes the PSO algorithm according to the system architecture.
         """
+        if not self.arr_items:
+                    return [], [] # Return empty lists if there are no items to pack
+
         # 1. Initialize particle population (each particle is a permutation of items)
         arr_swarm = [random.sample(self.arr_items, len(self.arr_items)) for _ in range(self.int_particle_count)]
         arr_velocities = [[(0, 0) for _ in self.arr_items] for _ in range(self.int_particle_count)] # Simplified velocity

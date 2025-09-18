@@ -83,12 +83,6 @@ The developed tool directly facilitates answering the three core research questi
 
 This tool provides the complete experimental framework required to generate the data necessary for your research analysis.
 
-Perfect 👍 since you have **large storage available for the dataset**, you should make that crystal clear in your `README.md`.
-
-That way, anyone using your project knows **where to get the data, how to store it, and how it connects to your system**.
-
-Here’s what I suggest adding:
-
 #### **6. Dataset Access**
 
 This project uses the **2021 Amazon Last Mile Routing Research Challenge (ALM-RRC) Dataset**, which is required for running simulations.

@@ -72,12 +72,26 @@ def simulate():
         # Find the route ID matching the selected vehicle capacity
         str_route_id = obj_data_loader.get_route_by_capacity(dict_routes, flt_selected_capacity)
         if not str_route_id:
-            return jsonify({"error": "No route found for the selected vehicle capacity."}), 400
+            return jsonify({"error": "No route containing packages could be found for the selected vehicle capacity. Please try another capacity."}), 400
         
         # Get vehicle and package data for the simulation
         dict_vehicle_data, arr_package_data = obj_data_loader.prepare_simulation_data(
             str_route_id, dict_routes, dict_packages
         )
+
+        # ----- PREPARE INPUT DATA FOR FRONTEND -----
+        flt_total_initial_volume = sum(
+            p['width'] * p['height'] * p['depth'] for p in arr_package_data
+        )
+        
+        dict_input_data = {
+            "vehicle_stats": {
+                "capacity": dict_vehicle_data['capacity_cm3'],
+                "total_item_volume": round(flt_total_initial_volume),
+                "num_items": len(arr_package_data)
+            },
+            "items_to_load": arr_package_data
+        }
 
         # Initialize the problem solver with the selected data and algorithm
         obj_solver = ProblemSolver(str_selected_algorithm, dict_vehicle_data, arr_package_data)
@@ -94,14 +108,17 @@ def simulate():
         # --- PREPARE THE RESPONSE ---
         # Append runtime metrics to the solution dictionary
         dict_solution['metrics']['execution_time'] = round(flt_execution_time, 4)
-        # Note: memory_profiler is complex to integrate into a live web request.
-        # This value is a placeholder; real memory profiling should be done offline.
         dict_solution['metrics']['memory_usage'] = "N/A"
+        
+        # Add the initial input data to the final response
+        dict_solution['input_data'] = dict_input_data
 
         print("--- Simulation complete. Sending results to frontend. ---")
         return jsonify(dict_solution)
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"An error occurred during simulation: {e}")
         return jsonify({"error": str(e)}), 500
 

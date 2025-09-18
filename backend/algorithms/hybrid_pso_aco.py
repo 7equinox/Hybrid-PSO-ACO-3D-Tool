@@ -112,6 +112,9 @@ class HybridPSO_ACO:
 
     def run(self):
         """ Executes the Hybrid PSO-ACO algorithm. """
+        if not self.arr_items:
+            return [], [] # Return empty lists if there are no items to pack
+
         # 1. Initialization
         arr_swarm = [random.sample(self.arr_items, len(self.arr_items)) for _ in range(self.int_particle_count)]
         arr_pbest_positions = list(arr_swarm)

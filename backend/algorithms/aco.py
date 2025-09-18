@@ -65,6 +65,9 @@ class ACO:
         """
         Executes the ACO algorithm according to the system architecture.
         """
+        if not self.arr_items:
+            return [], [] # Return empty lists if there are no items to pack
+
         for _ in range(self.int_iterations):
             arr_all_ant_solutions = []
             

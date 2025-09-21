@@ -1,133 +1,138 @@
-"""
-System Name: OPTIMIZING DYNAMIC 3D LOADING AND UNLOADING FOR DELIVERY VEHICLES
-Module Name: Ant Colony Optimization (ACO) Algorithm
-
-Purpose of this file:
-To implement the standalone Ant Colony Optimization algorithm as
-depicted in the ACO System Architecture flowchart.
-
-Author/ s:
-ALFARO, ABRAM  S.
-BUNAO, JOHN GLAY C.
-DELA CRUZ, JUAN GABRIEL D.
-ERFE, JEFFERSON B.
-ESTONILO, JULIUS EVAN C.
-"""
 import random
 import numpy as np
-from py3dbp import Packer, Bin, Item
+from utils.structures import Bin
+from utils.metrics_calculator import simulate_unloading
 
-class ACO:
+# --- Algorithm Parameters ---
+# These values can be tuned to adjust the algorithm's performance
+NUM_ANTS = 25 # The number of ants in the colony
+MAX_ITERATIONS = 50 # Number of cycles for the ants to build solutions
+EVAPORATION_RATE = 0.5 # rho: How fast pheromone trails fade
+PHEROMONE_INTENSITY = 1.0 # Q: A constant affecting the amount of deposited pheromone
+ALPHA = 1.0 # Controls the influence of the pheromone trail
+BETA = 2.0 # Controls the influence of heuristic information (e.g., item volume)
+
+def _calculate_fitness(item_sequence, container):
     """
-    Implements the standalone Ant Colony Optimization algorithm for 3D bin packing.
+    Evaluates the quality of a sequence, identical to the fitness function in PSO.
+    This ensures that both standalone algorithms are optimizing for the same objectives,
+    allowing for a fair comparison.
     """
-    def __init__(self, dict_vehicle, arr_packages, int_iterations, int_population_size):
-        self.obj_bin = Bin(
-            dict_vehicle['name'],
-            dict_vehicle['width'],
-            dict_vehicle['height'],
-            dict_vehicle['depth'],
-            99999
-        )
-        self.arr_items = [
-            Item(p['name'], p['width'], p['height'], p['depth'], p['weight']) for p in arr_packages
-        ]
-        self.int_iterations = int_iterations
-        self.int_ant_count = int_population_size
-        self.int_num_items = len(self.arr_items)
-        
-        # Map items to indices for the pheromone matrix
-        self.dict_item_to_idx = {item.name: i for i, item in enumerate(self.arr_items)}
-        self.dict_idx_to_item = {i: item for i, item in enumerate(self.arr_items)}
-        
-        # ACO parameters
-        self.flt_alpha = 1.0  # Pheromone influence
-        self.flt_beta = 2.0   # Heuristic influence (e.g., item volume)
-        self.flt_evaporation_rate = 0.5
-        self.flt_pheromone_deposit = 100.0
+    temp_bin = Bin(container['width'], container['height'], container['depth'], container['capacity'])
+    temp_bin.pack_items(item_sequence)
+    
+    packed_volume = sum(item['volume'] for item in temp_bin.items)
+    utilization_score = (packed_volume / container['capacity'])
+    
+    unloading_order = [item['id'] for item in item_sequence]
+    unloading_results = simulate_unloading(temp_bin.items, unloading_order)
+    
+    if unloading_results['feasibility'] != "Feasible":
+        return 0 # A sequence that is not fully unloadable gets the worst possible score
 
-        # Pheromone matrix: Represents desirability of placing item j after item i
-        self.mtx_pheromones = np.ones((self.int_num_items, self.int_num_items))
-        
-        self.arr_best_solution_so_far = []
-        self.flt_best_fitness_so_far = -1
+    relocation_penalty = unloading_results['relocations']
+    efficiency_score = 1 - (relocation_penalty / (len(item_sequence)**2 + 1))
+    
+    fitness = (0.6 * utilization_score) + (0.4 * efficiency_score)
+    return fitness
 
-    def _fitness_function(self, arr_item_sequence):
-        obj_packer = Packer()
-        obj_packer.add_bin(self.obj_bin)
-        for obj_item in arr_item_sequence:
-            obj_packer.add_item(obj_item)
-        
-        obj_packer.pack()
-        return sum(item.get_volume() for item in obj_packer.bins[0].items)
 
-    def run(self):
-        """
-        Executes the ACO algorithm according to the system architecture.
-        """
-        if not self.arr_items:
-            return [], [] # Return empty lists if there are no items to pack
+class Ant:
+    """Represents a single ant, which builds a candidate solution."""
+    def __init__(self, num_items):
+        self.tour = [] # The sequence of items (nodes) visited
+        self.visited = [False] * num_items
 
-        for _ in range(self.int_iterations):
-            arr_all_ant_solutions = []
-            
-            # 1. Distribute ants
-            for _ in range(self.int_ant_count):
-                arr_current_solution = self._construct_solution_for_ant()
-                arr_all_ant_solutions.append(arr_current_solution)
+    def add_to_tour(self, item_index):
+        """Adds an item to the ant's tour and marks it as visited."""
+        self.tour.append(item_index)
+        self.visited[item_index] = True
 
-            # 2. Evaporate pheromones
-            self.mtx_pheromones *= (1 - self.flt_evaporation_rate)
-            
-            # 3. Deposit pheromones
-            for arr_solution in arr_all_ant_solutions:
-                flt_fitness = self._fitness_function(arr_solution)
-                if flt_fitness > self.flt_best_fitness_so_far:
-                    self.flt_best_fitness_so_far = flt_fitness
-                    self.arr_best_solution_so_far = arr_solution
-                    
-                # Deposit pheromones on the path of this solution
-                for i in range(len(arr_solution) - 1):
-                    int_from_idx = self.dict_item_to_idx[arr_solution[i].name]
-                    int_to_idx = self.dict_item_to_idx[arr_solution[i+1].name]
-                    self.mtx_pheromones[int_from_idx, int_to_idx] += self.flt_pheromone_deposit / (self.flt_best_fitness_so_far + 1)
 
-        # Use the best found sequence for final packing
-        obj_final_packer = Packer()
-        obj_final_packer.add_bin(self.obj_bin)
-        for obj_item in self.arr_best_solution_so_far:
-            obj_final_packer.add_item(obj_item)
-            
-        obj_final_packer.pack()
-        return obj_final_packer.bins[0].items, obj_final_packer.bins[0].unfitted_items
+def solve(items, container):
+    """
+    Main function to run the Ant Colony Optimization algorithm.
+    """
+    num_items = len(items)
+    
+    # 1. Initialize pheromone matrix and heuristic information
+    # The pheromone matrix stores the learned desirability of transitions between items.
+    pheromone_matrix = np.ones((num_items, num_items))
+    
+    # Heuristic info: We prefer to pack larger items first as this is a common packing heuristic.
+    # The heuristic value for choosing item j is proportional to its volume.
+    heuristic_info = np.array([item['volume'] for item in items])
+    heuristic_info[heuristic_info == 0] = 1e-10 # Avoid division by zero for items with no volume
+    
+    best_solution = None
+    best_fitness = -1
 
-    def _construct_solution_for_ant(self):
-        """ An ant builds a solution (a permutation of items) """
-        arr_solution = []
-        arr_unvisited_items = list(range(self.int_num_items))
-        
-        int_current_item_idx = random.choice(arr_unvisited_items)
-        arr_unvisited_items.remove(int_current_item_idx)
-        arr_solution.append(self.dict_idx_to_item[int_current_item_idx])
-        
-        while arr_unvisited_items:
-            arr_probabilities = []
-            for int_next_item_idx in arr_unvisited_items:
-                flt_pheromone = self.mtx_pheromones[int_current_item_idx, int_next_item_idx] ** self.flt_alpha
-                # Heuristic: prefer larger items first
-                flt_heuristic = (self.dict_idx_to_item[int_next_item_idx].get_volume() ** self.flt_beta)
-                arr_probabilities.append(flt_pheromone * flt_heuristic)
+    # Announce start
+    print("[ACO] Starting ACO optimization...")
+
+    # 2. Main ACO loop
+    for _ in range(MAX_ITERATIONS):
+        colony = [Ant(num_items) for _ in range(NUM_ANTS)]
+        ant_solutions = []
+
+        # a. Each ant constructs a solution
+        for ant in colony:
+            # Start each ant at a random item
+            start_node = random.randint(0, num_items - 1)
+            ant.add_to_tour(start_node)
+
+            while len(ant.tour) < num_items:
+                current_node = ant.tour[-1]
+                
+                # Calculate selection probabilities for the next item
+                probabilities = []
+                for next_node in range(num_items):
+                    if not ant.visited[next_node]:
+                        pheromone_level = pheromone_matrix[current_node][next_node] ** ALPHA
+                        heuristic_value = heuristic_info[next_node] ** BETA
+                        probabilities.append((next_node, pheromone_level * heuristic_value))
+                
+                # Normalize probabilities
+                total_prob = sum(p for _, p in probabilities)
+                if total_prob == 0: # If all remaining nodes have 0 probability, pick randomly
+                     next_node = random.choice([p[0] for p in probabilities])
+                else:
+                    nodes, probs = zip(*probabilities)
+                    probs = np.array(probs) / total_prob
+                    next_node = np.random.choice(nodes, p=probs)
+                
+                ant.add_to_tour(next_node)
             
-            flt_sum_probs = sum(arr_probabilities)
-            if flt_sum_probs == 0: # Avoid division by zero
-                arr_probabilities = np.ones(len(arr_unvisited_items)) / len(arr_unvisited_items)
-            else:
-                arr_probabilities = np.array(arr_probabilities) / flt_sum_probs
-            
-            int_next_item_idx = np.random.choice(arr_unvisited_items, p=arr_probabilities)
-            
-            arr_unvisited_items.remove(int_next_item_idx)
-            arr_solution.append(self.dict_idx_to_item[int_next_item_idx])
-            int_current_item_idx = int_next_item_idx
-            
-        return arr_solution
+            # Ant has completed its tour, convert indices back to item objects
+            item_sequence = [items[i] for i in ant.tour]
+            fitness = _calculate_fitness(item_sequence, container)
+            ant_solutions.append((item_sequence, fitness))
+
+        # b. Update the global best solution if a better one was found
+        current_best_ant_solution, current_best_ant_fitness = max(ant_solutions, key=lambda x: x[1])
+        if current_best_ant_fitness > best_fitness:
+            best_fitness = current_best_ant_fitness
+            best_solution = current_best_ant_solution
+
+        # Print progress for the current iteration
+        print(f"\r[ACO] Iteration {_ + 1}/{MAX_ITERATIONS} | Best Fitness: {best_fitness:.4f}", end="")
+
+        # c. Update pheromone matrix
+        # Pheromone Evaporation
+        pheromone_matrix *= (1 - EVAPORATION_RATE)
+
+        # Pheromone Deposition
+        for solution, fitness in ant_solutions:
+            if fitness > 0: # Only good solutions should deposit pheromones
+                # Create a map from item ID to index for quick lookups
+                id_to_index_map = {item['id']: i for i, item in enumerate(items)}
+                
+                for i in range(num_items - 1):
+                    from_node_idx = id_to_index_map[solution[i]['id']]
+                    to_node_idx = id_to_index_map[solution[i+1]['id']]
+                    # Deposit pheromone proportional to the solution's quality
+                    pheromone_matrix[from_node_idx][to_node_idx] += (PHEROMONE_INTENSITY * fitness)
+
+    # Add final completion message
+    print("\n[ACO] Optimization complete.")
+    return best_solution

@@ -1,129 +1,96 @@
-"""
-System Name: OPTIMIZING DYNAMIC 3D LOADING AND UNLOADING FOR DELIVERY VEHICLES
-Module Name: Main Application Server
+import os
+from flask import Flask, jsonify, render_template, request
+from utils.data_loader import load_data, get_routes_and_capacities, get_route_data_by_capacity
+from utils.problem_solver import solve_packing_problem
 
-Purpose of this file:
-To provide a web server endpoint that receives simulation requests from the
-frontend, orchestrates the execution of optimization algorithms, and
-returns the calculated performance metrics.
+# Initialize the Flask application
+app = Flask(__name__, template_folder='../templates', static_folder='../static')
 
-Author/ s:
-ALFARO, ABRAM  S.
-BUNAO, JOHN GLAY C.
-DELA CRUZ, JUAN GABRIEL D.
-ERFE, JEFFERSON B.
-ESTONILO, JULIUS EVAN C.
-"""
-import time
-import json
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from assets.data_loader import DataLoader
-from assets.problem_solver import ProblemSolver
+# Define the absolute paths for the dataset files to ensure they are found correctly
+# This is robust and avoids issues with the script's execution directory
+base_dir = os.path.dirname(os.path.abspath(__file__))
+PACKAGE_FILE = os.path.join(base_dir, 'almrrc2021', 'almrrc2021-data-evaluation', 'model_apply_inputs', 'eval_package_data.json')
+ROUTE_FILE = os.path.join(base_dir, 'almrrc2021', 'almrrc2021-data-evaluation', 'model_apply_inputs', 'eval_route_data.json')
 
-# Initialize Flask app
-app = Flask(__name__)
-# Enable Cross-Origin Resource Sharing to allow communication with the frontend
-CORS(app)
+# Load package and route data into memory when the application starts
+# This avoids re-reading large files on every request, improving performance
+package_data, route_data = load_data(PACKAGE_FILE, ROUTE_FILE)
+# Pre-process the route data to get a list of unique vehicle capacities for the frontend
+routes_and_capacities = get_routes_and_capacities(route_data)
 
-# Global variables to hold data to avoid reloading on every request
-obj_data_loader = None
-dict_routes = None
-dict_packages = None
-
-def initialize_data():
+@app.route('/')
+def index():
     """
-    Initializes the data loader and loads dataset into memory.
-    This function is called once when the server starts.
+    Serves the main HTML page of the application.
+    This is the user-facing interface.
     """
-    global obj_data_loader, dict_routes, dict_packages
-    
-    # Path to the dataset within the backend directory
-    str_route_data_path = 'almrrc2021/almrrc2021-data-training/model_build_inputs/route_data.json'
-    str_package_data_path = 'almrrc2021/almrrc2021-data-training/model_build_inputs/package_data.json'
-    
-    try:
-        obj_data_loader = DataLoader(str_route_data_path, str_package_data_path)
-        dict_routes, dict_packages = obj_data_loader.load_data()
-        print("--- Dataset loaded successfully ---")
-    except FileNotFoundError as e:
-        print(f"Error loading dataset: {e}. Please ensure the 'almrrc2021' folder is in the 'backend' directory.")
-        obj_data_loader = None
+    return render_template('index.html')
 
+@app.route('/api/capacities', methods=['GET'])
+def get_capacities():
+    """
+    API endpoint to provide the list of unique vehicle capacities to the frontend.
+    This populates the dropdown in the simulation settings modal.
+    """
+    # Sorting ensures a consistent order in the UI
+    unique_capacities = sorted(list(routes_and_capacities.keys()))
+    return jsonify(unique_capacities)
 
-@app.route('/simulate', methods=['POST'])
+@app.route('/api/initial-data', methods=['POST'])
+def get_initial_data():
+    """
+    API endpoint to fetch the initial data for a selected vehicle capacity.
+    When a user selects a capacity, this provides the corresponding route and package info
+    to display in the left panel of the UI before the simulation runs.
+    """
+    data = request.get_json()
+    capacity = float(data.get('capacity', 0))
+
+    if not capacity:
+        return jsonify({"error": "Capacity not provided"}), 400
+
+    # Retrieve pre-filtered route information based on the selected capacity
+    initial_data = get_route_data_by_capacity(capacity, route_data, package_data)
+
+    if not initial_data:
+        return jsonify({"error": "No data found for the selected capacity"}), 404
+
+    return jsonify(initial_data)
+
+@app.route('/api/simulate', methods=['POST'])
 def simulate():
     """
-    Handles the simulation request from the frontend.
-    It expects a JSON payload with 'algorithm' and 'vehicle_capacity'.
+    The main API endpoint that triggers the optimization process.
+    It receives the algorithm and vehicle capacity from the user,
+    runs the simulation, and returns the calculated metrics.
     """
-    if obj_data_loader is None:
-        return jsonify({"error": "Dataset not loaded. Check server logs."}), 500
-
-    # Get data from the frontend request
-    json_data = request.get_json()
-    str_selected_algorithm = json_data.get('algorithm')
-    flt_selected_capacity = float(json_data.get('vehicle_capacity'))
-    
-    print(f"Received simulation request: Algorithm={str_selected_algorithm}, Capacity={flt_selected_capacity}")
-
-    # Prepare the simulation environment
     try:
-        # Find the route ID matching the selected vehicle capacity
-        str_route_id = obj_data_loader.get_route_by_capacity(dict_routes, flt_selected_capacity)
-        if not str_route_id:
-            return jsonify({"error": "No route containing packages could be found for the selected vehicle capacity. Please try another capacity."}), 400
-        
-        # Get vehicle and package data for the simulation
-        dict_vehicle_data, arr_package_data = obj_data_loader.prepare_simulation_data(
-            str_route_id, dict_routes, dict_packages
-        )
+        data = request.get_json()
+        algorithm_name = data.get('algorithm')
+        capacity = float(data.get('capacity', 0))
 
-        # ----- PREPARE INPUT DATA FOR FRONTEND -----
-        flt_total_initial_volume = sum(
-            p['width'] * p['height'] * p['depth'] for p in arr_package_data
-        )
-        
-        dict_input_data = {
-            "vehicle_stats": {
-                "capacity": dict_vehicle_data['capacity_cm3'],
-                "total_item_volume": round(flt_total_initial_volume),
-                "num_items": len(arr_package_data)
-            },
-            "items_to_load": arr_package_data
-        }
+        # Log the incoming request
+        print(f"\n[INFO] Received simulation request: Algorithm='{algorithm_name}', Capacity={capacity}")
 
-        # Initialize the problem solver with the selected data and algorithm
-        obj_solver = ProblemSolver(str_selected_algorithm, dict_vehicle_data, arr_package_data)
-        
-        # Start timer for execution time metric
-        flt_start_time = time.time()
-        
-        # --- EXECUTE THE OPTIMIZATION ALGORITHM ---
-        dict_solution = obj_solver.run()
+        if not all([algorithm_name, capacity]):
+            return jsonify({"error": "Missing parameters. Required: algorithm, capacity"}), 400
 
-        flt_end_time = time.time()
-        flt_execution_time = flt_end_time - flt_start_time
+        # Delegate the complex task of running the simulation to the problem_solver module
+        # This keeps the main app file clean and focused on web-related tasks
+        results = solve_packing_problem(algorithm_name, capacity, route_data, package_data)
 
-        # --- PREPARE THE RESPONSE ---
-        # Append runtime metrics to the solution dictionary
-        dict_solution['metrics']['execution_time'] = round(flt_execution_time, 4)
-        dict_solution['metrics']['memory_usage'] = "N/A"
-        
-        # Add the initial input data to the final response
-        dict_solution['input_data'] = dict_input_data
+        if "error" in results:
+             return jsonify(results), 500
 
-        print("--- Simulation complete. Sending results to frontend. ---")
-        return jsonify(dict_solution)
+        return jsonify(results)
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"An error occurred during simulation: {e}")
-        return jsonify({"error": str(e)}), 500
+        # Gracefully handle any unexpected errors during simulation
+        # This prevents the server from crashing and provides a helpful error message to the user
+        app.logger.error(f"An error occurred during simulation: {e}")
+        return jsonify({"error": "An internal server error occurred.", "details": str(e)}), 500
 
 if __name__ == '__main__':
-    # Initialize data once on server startup
-    initialize_data()
-    # Run the Flask server
-    app.run(debug=True, port=5000)
+    # Runs the Flask application in debug mode for development
+    # In a production environment, a proper WSGI server like Gunicorn or Waitress should be used
+    app.run(debug=True)

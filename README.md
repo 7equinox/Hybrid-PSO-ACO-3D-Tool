@@ -1,120 +1,109 @@
-# OPTIMIZING DYNAMIC 3D LOADING AND UNLOADING FOR DELIVERY VEHICLES
-# Main Project Documentation
+# Hybrid PSO-ACO 3D Loading Optimization Tool
 
-## 1. System Overview
+This project is a full-stack web application designed to implement and evaluate a hybrid Particle Swarm Optimization and Ant Colony Optimization (PSO-ACO) algorithm for solving dynamic 3D loading and unloading problems for delivery vehicles. This tool directly supports the research outlined in the thesis: "OPTIMIZING DYNAMIC 3D LOADING AND UNLOADING FOR DELIVERY VEHICLES USING HYBRID PARTICLE SWARM AND ANT COLONY ALGORITHM".
 
-This project provides the backend implementation for a research tool designed to solve dynamic 3D loading problems for delivery vehicles. It implements and compares three metaheuristic algorithms: standalone Particle Swarm Optimization (PSO), standalone Ant Colony Optimization (ACO), and a novel Hybrid PSO-ACO algorithm.
+## Alignment with Research
 
-The system is designed to directly address the research objectives outlined in the project's "Statement of the Problem" by providing a platform for experimental evaluation based on metrics like volume utilization, unloading feasibility, and scalability.
+This implementation directly addresses the core research objectives by:
 
-The backend is built with Python using the Flask framework and communicates with the provided HTML/CSS/JS frontend.
+1.  **Implementing the System Architectures:** The backend provides separate, modular implementations for standalone PSO, standalone ACO, and the proposed hybrid PSO-ACO algorithm, matching the flowcharts and descriptions in Chapter 3.
+2.  **Solving the Statement of the Problem:** The tool is designed to answer the key research questions by running simulations and calculating the specific performance metrics defined in the problem statement (volume utilization, relocation count, feasibility, sequence length, computation time, and memory usage).
+3.  **Utilizing the Specified Dataset:** The application is built to consume the `eval_package_data.json` and `eval_route_data.json` files from the 2021 Amazon Last Mile Routing Research Challenge Dataset.
+4.  **Providing a User Interface for Experimentation:** The web-based frontend allows for easy selection of algorithms and vehicle capacities, enabling the controlled experiments described in the methodology.
 
-## 2. Prerequisites
+## Features
 
-Before running the tool, ensure you have the following installed:
-*   **Python** (version 3.8 or newer)
-*   **pip** (Python package installer)
-*   The **2021 Amazon Last Mile Routing Research Challenge Dataset**. The entire `almrrc2021` folder must be placed inside the `backend` directory.
+-   Interactive web interface to configure and run simulations.
+-   Backend server built with Flask (Python).
+-   Modular implementation of PSO, ACO, and Hybrid PSO-ACO algorithms.
+-   Dynamic calculation and display of all key performance metrics outlined in the research.
+-   Data loading and preprocessing of the Amazon dataset.
+-   Scalability analysis through automated measurement of execution time and memory usage.
 
-## 3. How to Set Up and Run the Tool
+## Technical Stack
 
-Follow these steps to get the application running:
+-   **Backend:** Python 3, Flask, NumPy, Pandas, memory-profiler
+-   **Frontend:** HTML5, CSS3, JavaScript (no external frameworks)
+-   **Dataset:** JSON
 
-**Step 1: Set up the Backend**
-1.  Navigate to the `backend` directory in your terminal:
-    ```bash
-    cd path/to/optimizing_delivery_vehicles/backend
-    ```
-2.  (Recommended) Create and activate a Python virtual environment:
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
-    ```
-3.  Install the required Python libraries using the `requirements.txt` file:
-    ```bash
-    pip install -r requirements.txt
-    ```
-4.  Start the Flask server:
-    ```bash
-    python app.py
-    ```
-    The backend server will now be running at `http://127.0.0.1:5000`.
+## Prerequisites
 
-**Step 2: Run the Frontend**
-1.  Navigate to the `frontend` directory.
-2.  Open the `index.html` file in a modern web browser (like Chrome or Firefox).
+Before you begin, ensure you have the following installed on your system:
 
-The frontend will automatically connect to the backend server, and you can now run simulations.
+-   **Python 3.8 or newer:** [Download Python](https://www.python.org/downloads/)
+-   **pip** (Python's package installer, usually comes with Python)
+-   A modern web browser (e.g., Chrome, Firefox, Edge)
 
-## 4. Alignment with Chapter 3 Methodology
+## Installation and Setup
 
-This implementation strictly follows the methodology and system architectures defined in Chapter 3.
+Follow these steps to get the application running on your local machine.
 
-### System Architecture Implementation
+### 1. Clone the Repository
 
-*   **Particle Swarm Optimization (PSO)**: Implemented in `backend/algorithms/pso.py`. It follows the specified flowchart:
-    1.  `__init__`: Initializes a population of particles, where each particle's "position" is a unique permutation of the items to be loaded.
-    2.  `run` loop: Iteratively updates particle positions by influencing them towards their personal best (`pBest`) and the global best (`gBest`) solutions found so far.
-    3.  `_fitness_function`: Evaluates each particle's solution by using a 3D packing library (`py3dbp`) to calculate the total volume of packed items.
+Clone this project to your local machine using Git, or download the ZIP file and extract it.
 
-*   **Ant Colony Optimization (ACO)**: Implemented in `backend/algorithms/aco.py`. It mirrors the ACO flowchart:
-    1.  `__init__`: Initializes a pheromone matrix where `T(i, j)` represents the desirability of placing item `j` immediately after item `i`.
-    2.  `run` loop:
-        *   Ants construct solutions probabilistically based on pheromone levels and a heuristic (item volume).
-        *   `Evaporation`: Pheromone trails are globally reduced.
-        *   `Deposition`: Ants deposit pheromones on the paths of the solutions they created, with better solutions depositing more pheromones.
-    3.  The process converges towards solutions with highly-trafficked (high pheromone) paths.
-
-*   **Hybrid PSO-ACO Algorithm**: Implemented in `backend/algorithms/hybrid_pso_aco.py`, this follows the "Pheromone-Augmented Particle Swarm Optimization" architecture:
-    1.  `__init__`: Initializes both PSO particles and an ACO pheromone matrix.
-    2.  The main loop is driven by PSO, evaluating `pBest` and `gBest`.
-    3.  **Key Hybridization Step 1 - Weighted Pheromone Update**: After each PSO iteration, the best-performing particles (elites) are ranked. They then deposit pheromones on the matrix, reinforcing the item sequences that led to good solutions (`_update_pheromones` function). This directly integrates ACO's memory mechanism into PSO.
-    4.  **Key Hybridization Step 2 - Pheromone-Guided Velocity**: During the particle position update (`_update_particle_position`), a new component is added. In addition to moving towards `pBest` and `gBest`, a particle's item sequence is slightly perturbed based on the strongest pheromone trails, nudging the swarm towards patterns found to be effective by the entire colony.
-
-## 5. Answering the Statement of the Problem
-
-The developed tool directly facilitates answering the three core research questions:
-
-*   **RQ1 (Optimal Item Loading)** & **RQ2 (Optimal Item Unloading)**:
-    By selecting any of the three algorithms and running a simulation, the user is presented with metrics for **Volume Utilization**, **Relocation Count**, **Unloading Feasibility**, and **Unloading Sequence Length**. These outputs can be recorded over multiple runs (as described in the methodology) to statistically compare the performance of the Hybrid PSO-ACO against the standalone algorithms.
-
-*   **RQ3 (Scalability)**:
-    The frontend allows the user to select from different **Vehicle Volume Capacities**. Each capacity corresponds to a different problem instance from the dataset with a varying number of items. By running simulations for each capacity and recording the metrics (especially `Solution Quality Degradation`, `Feasibility Rate`, and `Convergence Stability` which can be derived from execution time), the user can directly compare how each algorithm's performance scales as the problem complexity increases.
-
-This tool provides the complete experimental framework required to generate the data necessary for your research analysis.
-
-Perfect 👍 since you have **large storage available for the dataset**, you should make that crystal clear in your `README.md`.
-
-That way, anyone using your project knows **where to get the data, how to store it, and how it connects to your system**.
-
-Here’s what I suggest adding:
-
-#### **6. Dataset Access**
-
-This project uses the **2021 Amazon Last Mile Routing Research Challenge (ALM-RRC) Dataset**, which is required for running simulations.
-
-Due to GitHub’s file size limitations, the dataset is **not included in this repository**. Instead, you can download it from the provided storage:
-
-* **Download Link:** \[[Registry of Open Data on AWS](https://registry.opendata.aws/amazon-last-mile-challenges/)]
-* **Size:** \~3 GB total
-* **Contents:** Training and evaluation JSON files (`route_data.json`, `package_data.json`, `travel_times.json`, etc.)
-
-Once downloaded, place the dataset inside the `backend` folder:
-
-```plaintext
-Hybrid-PSO-ACO-3D-Tool/
-├── backend/
-│   ├── almrrc2021/
-│   │   ├── almrrc2021-data-training/
-│   │   └── almrrc2021-data-evaluation/
-│   ├── assets/
-│   ├── algorithms/
-│   └── app.py
-├── frontend/
-└── README.md
+```bash
+git clone <your-repository-url>
+cd HYBRID-PSO-ACO-3D-TOOL
 ```
 
-#### **7. Notes on Large Dataset Handling**
+### 2. Set Up a Virtual Environment (Recommended)
 
-* The dataset is **too large to be stored in GitHub**; it is excluded via `.gitignore`.
-* Ensure that the dataset folder structure matches exactly as shown above.
+Using a virtual environment is best practice to keep project dependencies isolated.
+
+```bash
+# Create a virtual environment named 'venv'
+python -m venv venv
+
+# Activate the virtual environment
+# On Windows (Git Bash or CMD):
+venv\Scripts\activate
+# On macOS/Linux:
+source venv/bin/activate
+```
+
+### 3. Install Dependencies
+
+Install all the required Python packages using the `requirements.txt` file.
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Ensure Dataset is in Place
+
+Verify that the Amazon dataset files are correctly placed in the following directory:
+`HYBRID-PSO-ACO-3D-TOOL/backend/almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/`
+
+The two required files are:
+- `eval_package_data.json`
+- `eval_route_data.json`
+
+## How to Run the Tool
+
+Once the setup is complete, you can start the application with a single command from the project's root directory (`HYBRID-PSO-ACO-3D-TOOL/`).
+
+```bash
+# This command runs the main Flask application file.
+python backend/app.py
+```
+
+After running the command, you will see output in your terminal similar to this:
+```
+ * Serving Flask app 'app'
+ * Debug mode: on
+WARNING: This is a development server. Do not use it in a production deployment.
+Use a production WSGI server instead.
+ * Running on http://127.0.0.1:5000
+Press CTRL+C to quit
+```
+
+**Open your web browser and navigate to the URL shown: [http://127.0.0.1:5000](http://127.0.0.1:5000)**
+
+## Using the Application
+
+1.  **Modify Simulation:** Click the "Modify Simulation" button to open the settings modal.
+2.  **Select Algorithm:** Choose one of the three algorithms to test. The default is Particle Swarm Optimization.
+3.  **Select Vehicle Capacity:** From the dropdown menu, select one of the available vehicle volume capacities from the dataset. The application will automatically load the corresponding item data on the left panel.
+4.  **Run Simulation:** Click the "Simulate" button. The application will send the configuration to the backend, run the optimization, and display the results and calculated metrics in the right panel. Please be patient, as the simulations can take some time to complete.
+5.  **Clear Simulation:** To reset the interface, click the "Clear Simulation" button in the modal.

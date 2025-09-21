@@ -1,5 +1,3 @@
-backend/almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_travel_times.json
-backend/almrrc2021/almrrc2021-data-evaluation/model_score_inputs/
-backend/almrrc2021/almrrc2021-data-training/
+backend/almrrc2021/
 backend/algorithms/__pycache__/
 backend/utils/__pycache__/

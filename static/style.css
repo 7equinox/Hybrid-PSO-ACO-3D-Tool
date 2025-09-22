@@ -60,7 +60,7 @@ h3 {
 .table {
     margin-top: 10px;
     max-height: 725px;
-    min-width: 590px;
+    max-width: 590px;
     min-height: 389px;
     overflow: auto;
     position: relative;
@@ -88,22 +88,15 @@ h3 {
     color: #a5a5a5;
     font-size: 32px;
     font-weight: 700;
-    left: 50%;
     margin: 170px 0;
     position: absolute;
     text-align: center;
-    top: 0;
-    transform: translateX(-50%);
     width: 100%;
 }
 
 th {
     color: #e08128;
     font-weight: 400;
-    position: sticky; /* Make headers stick */
-    top: 0;
-    background: white; /* Give a background to prevent text overlap */
-    z-index: 10;
 }
 
 td:not(:first-child) {
@@ -111,17 +104,16 @@ td:not(:first-child) {
 }
 
 .custom-table {
-    border: none;
+    border: none;  
     border-collapse: collapse;
     table-layout: fixed;
     width: 100%;
 }
 
-.custom-table th,
+.custom-table th, 
 .custom-table td {
     border: 1px solid #333333;
     padding: 8px;
-    font-size: 14px;
 }
 
 .custom-table tr:first-child th,
@@ -138,7 +130,7 @@ td:not(:first-child) {
 .custom-table td:first-child,
 .custom-table.gray-border th:first-child,
 .custom-table.gray-border td:first-child {
-    border-left: none;
+    border-left: none; 
 }
 
 .custom-table th:last-child,
@@ -157,10 +149,6 @@ td:not(:first-child) {
     position: relative;
 }
 
-.right-section th { /* Styling for the dark theme table header */
-    background: #121212;
-}
-
 .settings {
     align-items: center;
     background-color: #343434;
@@ -174,10 +162,6 @@ td:not(:first-child) {
     position: absolute;
     right: 0;
     top: 0;
-    transition: background-color 0.3s;
-}
-.settings:hover {
-    background-color: #4a4a4a;
 }
 
 .gray-bg {
@@ -208,19 +192,26 @@ td:not(:first-child) {
 
 .table.gray-bg::-webkit-scrollbar {
     background-color: #252525;
+    height: 8px;
+    width: 8px;
 }
 
 .table.gray-bg::-webkit-scrollbar-thumb {
+    -webkit-box-shadow: inset 0 0 6px rgba(0,0,0,.3);
     background-color: #f5f5f5;
+    border-radius: 10px;
 }
 
 .table.gray-bg::-webkit-scrollbar-track {
+    -webkit-box-shadow: inset 0 0 6px rgba(0,0,0,0.3);
     background-color: #252525;
+    border-radius: 10px;
 }
 
-.custom-table.gray-border th,
+.custom-table.gray-border th, 
 .custom-table.gray-border td {
-    border-color: #f5f5f5;
+    border: 1px solid #f5f5f5;
+    padding: 8px;
 }
 
 .modal {
@@ -231,9 +222,8 @@ td:not(:first-child) {
     justify-content: center;
     left: 0;
     position: fixed;
-    top: 0;
+    top: 0; 
     width: 100%;
-    z-index: 1000;
 }
 
 .modal-content {
@@ -247,18 +237,15 @@ td:not(:first-child) {
     width: fit-content;
 }
 
-.modal-content i.fa-xmark {
+.modal-content i {
     animation: fadeIn 0.3s ease;
+    border-radius: 20px;
+    color: white;
     cursor: pointer;
     font-size: 20px;
     position: absolute;
     right: 15px;
     top: 15px;
-    transition: color 0.2s;
-}
-
-.modal-content i.fa-xmark:hover {
-    color: #e08128;
 }
 
 .modal-content .label {
@@ -282,17 +269,15 @@ td:not(:first-child) {
     font-weight: 700;
     line-height: 1.2;
     padding: 15px 20px;
-    transition: background-color 0.3s;
     width: 230px;
 }
 
-.modal-options button.active {
-    background-color: #90541c !important;
-    border-color: #e08128;
+.modal-content button:hover {
+    background-color: #e08128;
 }
 
-.modal-options button:not(.active):hover {
-    background-color: #4a4a4a;
+.modal-options .active {
+    background-color: #90541c;
 }
 
 .simulation-btn {
@@ -313,31 +298,6 @@ td:not(:first-child) {
     font-weight: 700;
     padding: 15px 20px;
     text-transform: uppercase;
-    transition: background-color 0.3s;
-}
-
-.simulation-btn button:hover {
-     background-color: #e08128;
-}
-
-/* Spinner */
-.spinner {
-    border: 5px solid #f3f3f3;
-    border-top: 5px solid #e08128;
-    border-radius: 50%;
-    width: 50px;
-    height: 50px;
-    animation: spin 1s linear infinite;
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    display: none; /* Initially hidden */
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
 }
 
 @keyframes fadeIn {
@@ -346,27 +306,67 @@ td:not(:first-child) {
 }
 
 /* Custom Select Box */
-select#capacity-select {
-    appearance: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
+select,
+::picker(select) {
+    appearance: base-select;
+}
+
+option::checkmark,
+select::picker-icon {
+    display: none;
+}
+
+::picker(select) {
+    border: 1px solid #393939;
+    border-radius: 10px;
+    box-shadow: -4px 8px 24px #00000040;
+    margin: 15px 0;
+    padding: 0;
+}
+
+select {
+    align-items: center;
     background-color: #343434;
     border: 1px solid #393939;
     border-radius: 10px;
     color: #ffffff;
     cursor: pointer;
+    display: flex;
     font-size: 24px;
     font-weight: 700;
+    justify-content: space-between;
     line-height: 1.2;
     padding: 15px 20px;
     width: 100%;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 15px center;
-    background-size: 1.5em;
 }
 
-select#capacity-select:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+.arrow {
+    align-self: center;
+    background-image: url("data:image/svg+xml,%3C%3Fxml version='1.0' encoding='UTF-8'%3F%3E%3Csvg id='Layer_1' xmlns='http://www.w3.org/2000/svg' viewBox='0 0 66.49 42.37'%3E%3Cdefs%3E%3Cstyle%3E .cls-1 %7B fill: %23221f20; stroke-width: 0px; %7D %3C/style%3E%3C/defs%3E%3Cpath class='cls-1' d='M3.96,0h58.57c3.37,0,5.2,3.95,3.01,6.52l-29.28,34.46c-1.58,1.86-4.45,1.86-6.03,0L.95,6.52C-1.23,3.95.59,0,3.96,0Z'/%3E%3C/svg%3E");
+    background-size: contain;
+    background-position: center;
+    background-repeat: no-repeat;
+    filter: brightness(4);
+    height: 20px;
+    width: 20px;
+    transition: rotate 0.25s;
+    
+    .currency-select:open & {
+        rotate: x 180deg;
+    }
+}
+
+option {
+    font-size: 16px;
+    font-weight: 500;
+    padding: 10px 15px;
+    place-items: start;
+    
+    &:nth-child(even):not(:hover) {
+        background: #dedede;
+    }
+    
+    &:hover {
+        background: rgb(224, 129, 40, 0.8);
+    }
 }

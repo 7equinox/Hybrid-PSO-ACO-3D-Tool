@@ -16,19 +16,19 @@
             <div class="banners">
                 <div class="white-bg">
                     <p class="label">Vehicle Volume Capacity (cm³)</p>
-                    <h2 data-id="initial-vehicle-capacity">0</h2>
+                    <h2 id="initial-vehicle-volume">0</h2>
                 </div>
                 <div class="white-bg">
                     <p class="label">Total Product Volume (cm³)</p>
-                    <h2 data-id="initial-total-volume">0</h2>
+                    <h2 id="initial-product-volume">0</h2>
                 </div>
                 <div class="white-bg">
                     <p class="label">Number of Products Loaded</p>
-                    <h2 data-id="initial-product-count">0</h2>
+                    <h2 id="initial-product-count">0</h2>
                 </div>
                 <div class="white-bg">
                     <p class="label">Total Product Service Time (s)</p>
-                    <h2 data-id="initial-service-time">0</h2>
+                    <h2 id="initial-service-time">0</h2>
                 </div>
             </div>
             <p class="label">Selected Items</p>
@@ -44,11 +44,11 @@
                             <th style="width: 130px;">Width (cm)</th>
                         </tr>
                     </thead>
-                    <tbody data-id="initial-item-table">
-                        <!-- Dynamic content will be inserted here -->
+                    <tbody id="initial-item-table-body">
+                        <!-- Rows will be dynamically inserted here -->
                     </tbody>
                 </table>
-                <p class="no-item" data-id="initial-no-item-msg">SELECT A VEHICLE TO VIEW ITEMS</p>
+                <p id="initial-no-item" class="no-item">SELECT VEHICLE</p>
             </div>
         </div>
         <!-- RIGHT SECTION -->
@@ -58,23 +58,23 @@
                 <p>Modify Simulation</p>
             </div>
             <p class="label">Algorithm</p>
-            <h1 style="text-align: left;" data-id="algorithm-name">N/A</h1>
+            <h1 id="result-algorithm-name" style="text-align: left;">*Algorithm Name*</h1>
             <div class="banners">
                 <div class="gray-bg">
                     <p class="label">Vehicle Volume Capacity (cm³)</p>
-                    <h2 data-id="result-vehicle-capacity">0</h2>
+                    <h2 id="result-vehicle-volume">0</h2>
                 </div>
                 <div class="gray-bg">
                     <p class="label">Total Product Volume (cm³)</p>
-                    <h2 data-id="result-total-volume">0</h2>
+                    <h2 id="result-product-volume">0</h2>
                 </div>
                 <div class="gray-bg">
                     <p class="label">Number of Products Loaded</p>
-                    <h2 data-id="result-product-count">0</h2>
+                    <h2 id="result-product-count">0</h2>
                 </div>
                 <div class="gray-bg">
                     <p class="label">Total Product Service Time (s)</p>
-                    <h2 data-id="result-service-time">0</h2>
+                    <h2 id="result-service-time">0</h2>
                 </div>
             </div>
             <div class="metrics">
@@ -83,11 +83,11 @@
                     <div class="metric-info gray-bg">
                         <div class="metric-item">
                             <p class="label">Execution Time (s)</p>
-                            <h3 data-id="metric-exec-time">0</h3>
+                            <h3 id="metric-exec-time">0</h3>
                         </div>
                         <div class="metric-item">
-                            <p class="label">Memory Usage</p>
-                            <h3 data-id="metric-mem-usage">0</h3>
+                            <p class="label">Memory Usage (MB)</p>
+                            <h3 id="metric-mem-usage">0</h3>
                         </div>
                     </div>
                 </div>
@@ -95,25 +95,25 @@
                     <p class="label">Loading/Unloading Metrics</p>
                     <div class="metric-info gray-bg">
                         <div class="metric-item">
-                            <p class="label">Volume Utilization</p>
-                            <h3 data-id="metric-vol-util">0</h3>
+                            <p class="label">Volume Utilization (%)</p>
+                            <h3 id="metric-vol-util">0</h3>
                         </div>
                         <div class="metric-item">
                             <p class="label">Relocation Count</p>
-                            <h3 data-id="metric-reloc-count">0</h3>
+                            <h3 id="metric-reloc-count">0</h3>
                         </div>
                         <div class="metric-item">
                             <p class="label">Unloading Feasibility</p>
-                            <h3 data-id="metric-feasibility">N/A</h3>
+                            <h3 id="metric-feasibility">N/A</h3>
                         </div>
                         <div class="metric-item">
                             <p class="label">Unloading Sequence Length</p>
-                            <h3 data-id="metric-seq-length">0</h3>
+                            <h3 id="metric-seq-len">0</h3>
                         </div>
                     </div>
                 </div>
             </div>
-            <p class="label">Loaded Items</p>
+            <p class="label">Packed Items</p>
             <div class="table gray-bg">
                 <table class="custom-table gray-border">
                     <thead>
@@ -126,11 +126,11 @@
                             <th style="width: 130px;">Width (cm)</th>
                         </tr>
                     </thead>
-                    <tbody data-id="result-item-table">
-                        <!-- Dynamic content will be inserted here -->
+                    <tbody id="result-item-table-body">
+                        <!-- Rows will be dynamically inserted here -->
                     </tbody>
                 </table>
-                 <p class="no-item" data-id="result-no-item-msg">RUN A SIMULATION TO SEE RESULTS</p>
+                 <p id="result-no-item" class="no-item">NO RESULTS</p>
             </div>
         </div>
     </div>
@@ -146,16 +146,32 @@
                 <button data-algo="PSO-ACO">PSO-ACO Algorithm</button>
             </div>
             <p class="label">Choose Vehicle Volume Capacity (cm³)</p>
-            <select name="capacity-select" id="capacity-select">
-                <option value="" selected disabled>Select Vehicle Capacity...</option>
-                <!-- Dynamic options will be inserted here -->
+            <select id="vehicle-capacity-select" class="currency-select" aria-label="Vehicle Capacity selection:">
+                <option value="" disabled selected>Select Vehicle Capacity</option>
+                <option value="3114853.25">3,114,853.25</option>
+                <option value="3313071.0">3,313,071.0</option>
+                <option value="3398021.5">3,398,021.5</option>
+                <option value="3539605.75">3,539,605.75</option>
+                <option value="3681190.0">3,681,190.0</option>
+                <option value="4247527.0">4,247,527.0</option>
+                <option value="4672279.5">4,672,279.5</option>
             </select>
             <div class="simulation-btn">
-                <button id="clearSimBtn">Clear Simulation</button>
-                <button id="runSimBtn">Simulate</button>
+                <button id="clear-sim-btn">Clear Simulation</button>
+                <button id="run-sim-btn">Simulate</button>
             </div>
         </div>
     </div>
+    
+    <!-- Spinner Loader -->
+    <div id="loader" class="modal" style="display: none; background: rgba(0, 0, 0, 0.85); color: white; font-size: 24px;">
+        <div class="loader-content">
+            <i class="fa-solid fa-spinner fa-spin fa-3x"></i>
+            <p style="margin-top: 20px;">Running Simulation... Please Wait.</p>
+        </div>
+    </div>
+
+
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

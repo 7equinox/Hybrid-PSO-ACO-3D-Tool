@@ -1,4 +1,6 @@
 Flask
 numpy
 pandas
-memory-profiler
+deap
+py3dbp
+memory_profiler

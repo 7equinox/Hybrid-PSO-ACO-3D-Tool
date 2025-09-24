@@ -377,3 +377,20 @@ option {
         background: rgb(224, 129, 40, 0.8);
     }
 }
+
+#cancel-load-btn {
+    margin-top: 25px;
+    padding: 10px 20px;
+    font-size: 16px;
+    font-weight: bold;
+    color: #121212;
+    background-color: #f5f5f5;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    cursor: pointer;
+    text-transform: uppercase;
+}
+
+#cancel-load-btn:hover {
+    background-color: #e0e0e0;
+}

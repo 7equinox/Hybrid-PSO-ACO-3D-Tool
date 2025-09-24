@@ -8,6 +8,7 @@ import math
 # Define paths to the dataset files.
 # Using os.path.join ensures compatibility across different operating systems.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# UPDATED to use the large dataset files
 # ROUTE_DATA_PATH = os.path.join(BASE_DIR, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_route_data.json')
 # PACKAGE_DATA_PATH = os.path.join(BASE_DIR, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_package_data.json')
 
@@ -27,7 +28,6 @@ def _load_json_data():
     if _route_data_cache is None:
         with open(ROUTE_DATA_PATH, 'r') as f:
             # As per Chapter 3, Pandas is used to structure logistical data.
-            # Loading into a DataFrame allows for easier manipulation.
             _route_data_cache = pd.DataFrame.from_dict(json.load(f), orient='index')
     if _package_data_cache is None:
         with open(PACKAGE_DATA_PATH, 'r') as f:
@@ -43,11 +43,11 @@ def get_all_vehicle_capacities():
     capacities = _route_data_cache['executor_capacity_cm3'].dropna().unique()
     return sorted([float(c) for c in capacities])
 
-def load_data(vehicle_capacity_cm3):
+def load_data(vehicle_capacity_cm3, page=1, page_size=100):
     """
-    Aggregates data from ALL vehicles matching the specified capacity.
-    It finds all routes matching the capacity, extracts all packages, and returns a
-    single aggregate info dictionary for the frontend alongside a list of all packages.
+    MODIFIED for PAGINATION: Aggregates data from ALL vehicles matching the specified capacity,
+    but now returns only a 'page' of packages at a time to avoid crashing the browser.
+    The aggregate info is calculated once and returned with every page.
     """
     _load_json_data()
     
@@ -65,9 +65,9 @@ def load_data(vehicle_capacity_cm3):
     route_ids = []
 
     # Iterate over all routes that matched the specified capacity to collect packages
-    for target_route_id, target_route_series in matching_routes_df.iterrows():
+    # This is still memory intensive on the server, but necessary to get total counts for pagination
+    for target_route_id, _ in matching_routes_df.iterrows():
         route_ids.append(target_route_id)
-        # Retrieve all packages associated with the identified route.
         route_packages = _package_data_cache.get(target_route_id, {})
         for stop_id, packages_at_stop in route_packages.items():
             for package_id, details in packages_at_stop.items():
@@ -81,35 +81,43 @@ def load_data(vehicle_capacity_cm3):
                     volume = height * width * depth
                     if volume > 0:
                         all_packages_info.append({
-                            'id': package_id,
-                            'route_id': target_route_id,
-                            'stop_id': stop_id,
-                            'height': height,
-                            'width': width,
-                            'depth': depth,
-                            'volume': volume,
-                            'service_time': service_time
+                            'id': package_id, 'route_id': target_route_id, 'stop_id': stop_id,
+                            'height': height, 'width': width, 'depth': depth,
+                            'volume': volume, 'service_time': service_time
                         })
                         total_package_volume += volume
                         total_service_time += service_time
                 except (ValueError, TypeError):
                     print(f"Skipping package {package_id} in route {target_route_id} due to invalid data.")
                     continue
-    
-    # The derived dimensions will be the same for all vehicles of the same capacity
+
+    # --- PAGINATION LOGIC ---
+    total_packages = len(all_packages_info)
+    total_pages = math.ceil(total_packages / page_size) if page_size > 0 else 1
+    start_index = (page - 1) * page_size
+    end_index = start_index + page_size
+    paginated_packages = all_packages_info[start_index:end_index]
+    # --- END PAGINATION LOGIC ---
+
     dimension = (vehicle_capacity_cm3 ** (1./3.))
     
-    # Create a single aggregate vehicle_info object for the frontend display
+    # This object now contains the grand totals and pagination metadata
     aggregate_vehicle_info = {
-        'id': ', '.join(route_ids),  # A composite ID of all matching routes
+        'id': ', '.join(route_ids),
         'capacity_cm3': vehicle_capacity_cm3,
         'width': math.floor(dimension),
         'height': math.floor(dimension),
         'depth': math.floor(dimension),
         'total_package_volume': total_package_volume,
         'total_service_time': total_service_time,
-        'num_packages': len(all_packages_info),
-        'num_vehicles_found': len(route_ids) # extra info
+        'num_packages': total_packages,
+        'num_vehicles_found': len(route_ids),
+        'pagination_meta': {
+            'current_page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+            'total_items': total_packages
+        }
     }
 
-    return aggregate_vehicle_info, all_packages_info
+    return aggregate_vehicle_info, paginated_packages

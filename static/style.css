@@ -226,6 +226,13 @@ td:not(:first-child) {
     width: 100%;
 }
 
+.loader-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
 .modal-content {
     background: #121212;
     border: 1px solid #393939;

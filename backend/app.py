@@ -8,7 +8,8 @@ import sys
 # Add the project root to the Python path to allow for absolute imports
 # This makes the code more modular and easier to maintain
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, project_root)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # Import custom modules for data handling and problem-solving
 from backend.utils.data_loader import load_data, get_all_vehicle_capacities
@@ -25,7 +26,9 @@ def index():
     Renders the main HTML page of the tool.
     This serves as the user interface for the simulation.
     """
-    return render_template('index.html')
+    # Dynamically fetch vehicle capacities to populate the dropdown on page load.
+    capacities = get_all_vehicle_capacities()
+    return render_template('index.html', capacities=capacities)
 
 # API endpoint to fetch data related to a specific vehicle capacity
 @app.route('/get_vehicle_data', methods=['POST'])

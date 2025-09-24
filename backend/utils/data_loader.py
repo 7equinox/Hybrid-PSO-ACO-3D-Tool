@@ -1,13 +1,18 @@
 # HYBRID-PSO-ACO-3D-TOOL/backend/utils/data_loader.py
+
 import json
 import os
 import pandas as pd
+import math
 
 # Define paths to the dataset files.
 # Using os.path.join ensures compatibility across different operating systems.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ROUTE_DATA_PATH = os.path.join(BASE_DIR, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_route_data.json')
-PACKAGE_DATA_PATH = os.path.join(BASE_DIR, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_package_data.json')
+# ROUTE_DATA_PATH = os.path.join(BASE_DIR, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_route_data.json')
+# PACKAGE_DATA_PATH = os.path.join(BASE_DIR, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_package_data.json')
+
+ROUTE_DATA_PATH = os.path.join(BASE_DIR, '../sample-data/test_route_data.json')
+PACKAGE_DATA_PATH = os.path.join(BASE_DIR, '../sample-data/test_package_data.json')
 
 # Cache loaded data to avoid reading from disk on every request
 _route_data_cache = None
@@ -16,12 +21,14 @@ _package_data_cache = None
 def _load_json_data():
     """
     Internal function to load and cache the dataset from JSON files.
-    Caching is a performance optimization to speed up subsequent requests.
+    This optimization improves performance on subsequent requests.
     """
     global _route_data_cache, _package_data_cache
     if _route_data_cache is None:
         with open(ROUTE_DATA_PATH, 'r') as f:
-            _route_data_cache = json.load(f)
+            # As per Chapter 3, Pandas is used to structure logistical data.
+            # Loading into a DataFrame allows for easier manipulation.
+            _route_data_cache = pd.DataFrame.from_dict(json.load(f), orient='index')
     if _package_data_cache is None:
         with open(PACKAGE_DATA_PATH, 'r') as f:
             _package_data_cache = json.load(f)
@@ -32,77 +39,77 @@ def get_all_vehicle_capacities():
     in the dataset. This is used to populate the dropdown in the frontend.
     """
     _load_json_data()
-    capacities = set()
-    for route_id, route_details in _route_data_cache.items():
-        if 'executor_capacity_cm3' in route_details:
-            capacities.add(float(route_details['executor_capacity_cm3']))
-    return sorted(list(capacities))
-
+    # Using pandas to efficiently find and sort unique capacity values.
+    capacities = _route_data_cache['executor_capacity_cm3'].dropna().unique()
+    return sorted([float(c) for c in capacities])
 
 def load_data(vehicle_capacity_cm3):
     """
-    Loads vehicle and package data for a given vehicle capacity.
-    It finds a route matching the capacity and extracts all associated packages.
+    Aggregates data from ALL vehicles matching the specified capacity.
+    It finds all routes matching the capacity, extracts all packages, and returns a
+    single aggregate info dictionary for the frontend alongside a list of all packages.
     """
     _load_json_data()
     
-    target_route_id = None
-    vehicle_info = {}
-    
-    # Find the first RouteID that matches the selected capacity
-    for route_id, route_details in _route_data_cache.items():
-        if route_details.get('executor_capacity_cm3') == vehicle_capacity_cm3:
-            target_route_id = route_id
-            vehicle_info = {
-                'id': route_id,
-                'capacity_cm3': route_details['executor_capacity_cm3'],
-                # For 3D bin packing, we need vehicle dimensions. The dataset only gives volume.
-                # We derive cube-like dimensions as a reasonable assumption for the simulation.
-                'width': round((vehicle_capacity_cm3 ** (1./3.))),
-                'height': round((vehicle_capacity_cm3 ** (1./3.))),
-                'depth': round((vehicle_capacity_cm3 ** (1./3.))),
-            }
-            break
+    # Find all routes that match the selected capacity.
+    matching_routes_df = _route_data_cache[
+        _route_data_cache['executor_capacity_cm3'] == vehicle_capacity_cm3
+    ]
 
-    if not target_route_id:
-        return None, None
-        
-    packages_info = []
+    if matching_routes_df.empty:
+        return None, []
+
+    all_packages_info = []
     total_package_volume = 0
     total_service_time = 0
+    route_ids = []
 
-    # Retrieve all packages for the identified route
-    route_packages = _package_data_cache.get(target_route_id, {})
-    for stop, packages_at_stop in route_packages.items():
-        for package_id, details in packages_at_stop.items():
-            dims = details.get('dimensions', {})
-            # Ensure package dimensions are valid numbers
-            try:
-                height = float(dims.get('height_cm', 0))
-                width = float(dims.get('width_cm', 0))
-                depth = float(dims.get('depth_cm', 0))
-                service_time = float(details.get('planned_service_time_seconds', 0))
-                
-                volume = height * width * depth
-                if volume > 0:
-                    packages_info.append({
-                        'id': package_id,
-                        'stop_id': stop,
-                        'height': height,
-                        'width': width,
-                        'depth': depth,
-                        'volume': volume,
-                        'service_time': service_time
-                    })
-                    total_package_volume += volume
-                    total_service_time += service_time
-            except (ValueError, TypeError):
-                # Skip packages with invalid or missing data
-                continue
+    # Iterate over all routes that matched the specified capacity to collect packages
+    for target_route_id, target_route_series in matching_routes_df.iterrows():
+        route_ids.append(target_route_id)
+        # Retrieve all packages associated with the identified route.
+        route_packages = _package_data_cache.get(target_route_id, {})
+        for stop_id, packages_at_stop in route_packages.items():
+            for package_id, details in packages_at_stop.items():
+                dims = details.get('dimensions', {})
+                try:
+                    height = float(dims.get('height_cm', 0))
+                    width = float(dims.get('width_cm', 0))
+                    depth = float(dims.get('depth_cm', 0))
+                    service_time = float(details.get('planned_service_time_seconds', 0))
+                    
+                    volume = height * width * depth
+                    if volume > 0:
+                        all_packages_info.append({
+                            'id': package_id,
+                            'route_id': target_route_id,
+                            'stop_id': stop_id,
+                            'height': height,
+                            'width': width,
+                            'depth': depth,
+                            'volume': volume,
+                            'service_time': service_time
+                        })
+                        total_package_volume += volume
+                        total_service_time += service_time
+                except (ValueError, TypeError):
+                    print(f"Skipping package {package_id} in route {target_route_id} due to invalid data.")
+                    continue
     
-    # Add summary information to the vehicle data dictionary
-    vehicle_info['total_package_volume'] = total_package_volume
-    vehicle_info['total_service_time'] = total_service_time
-    vehicle_info['num_packages'] = len(packages_info)
+    # The derived dimensions will be the same for all vehicles of the same capacity
+    dimension = (vehicle_capacity_cm3 ** (1./3.))
+    
+    # Create a single aggregate vehicle_info object for the frontend display
+    aggregate_vehicle_info = {
+        'id': ', '.join(route_ids),  # A composite ID of all matching routes
+        'capacity_cm3': vehicle_capacity_cm3,
+        'width': math.floor(dimension),
+        'height': math.floor(dimension),
+        'depth': math.floor(dimension),
+        'total_package_volume': total_package_volume,
+        'total_service_time': total_service_time,
+        'num_packages': len(all_packages_info),
+        'num_vehicles_found': len(route_ids) # extra info
+    }
 
-    return vehicle_info, packages_info
+    return aggregate_vehicle_info, all_packages_info

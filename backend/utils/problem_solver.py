@@ -5,30 +5,28 @@ import random
 from memory_profiler import memory_usage
 from py3dbp import Packer, Bin, Item
 
-# Import custom utilities and algorithm implementations
-# We only need `load_data` now as a fallback for the vehicle info.
-from backend.utils.data_loader import load_data 
+# --- CORRECTED IMPORT ---
+# Import the DEDICATED function for loading cached data for the simulation.
+from backend.utils.data_loader import get_vehicle_info_only 
 from backend.utils.metrics_calculator import calculate_all_metrics
 from backend.algorithms.pso import run_pso
 from backend.algorithms.aco import run_aco
 from backend.algorithms.hybrid_pso_aco import run_hybrid_pso_aco
 
-# --- FUNCTION SIGNATURE UPDATED ---
+# --- FUNCTION SIGNATURE CORRECTED back to 2 arguments ---
 def solve_loading_problem(algorithm_name, capacity_cm3, packages_info):
     """
-    Main orchestrator function that manages the entire simulation process.
-    It now receives the package data directly from the frontend, applies constraints, 
-    runs the algorithm, evaluates the result, and formats the output.
+    Main orchestrator function. Now uses a dedicated fast loader that reads
+    from the pre-filtered cache file, ensuring the simulation starts quickly.
     """
     
-    # Stage 1: Get the vehicle info. Package info is now passed as a parameter.
-    # We still call load_data just to get the vehicle dimensions, but we ignore its package list.
-    vehicle_info, _ = load_data(capacity_cm3) 
+    # Stage 1: Get ONLY the vehicle info. This is extremely fast.
+    vehicle_info = get_vehicle_info_only(capacity_cm3)
+    
     if not vehicle_info or not packages_info:
-        return {'error': 'Could not load data for the selected capacity.'}
+        return {'error': 'Could not get vehicle info or package data was missing.'}
         
-    # Stage 2: Apply the Dynamic Constraint as specified in Chapter 3.
-    # This simulates real-world disruptions like last-minute order cancellations.
+    # Stage 2: Apply Dynamic Constraint to the provided list
     if len(packages_info) > 1:
         num_to_remove = int(len(packages_info) * random.uniform(0.1, 0.2))
         packages_to_load = random.sample(packages_info, len(packages_info) - num_to_remove)
@@ -51,7 +49,10 @@ def solve_loading_problem(algorithm_name, capacity_cm3, packages_info):
     # The Fitness Function (unchanged)
     def evaluate_solution(item_order_indices):
         packer = Packer()
-        packer.add_bin(the_bin)
+        # Create a fresh bin for each evaluation
+        fresh_bin = Bin(the_bin.name, the_bin.width, the_bin.height, the_bin.depth, the_bin.max_weight)
+        packer.add_bin(fresh_bin)
+
         for i in item_order_indices:
             packer.add_item(items_to_pack[i])
         
@@ -110,9 +111,7 @@ def solve_loading_problem(algorithm_name, capacity_cm3, packages_info):
             pos = [float(p) for p in item.position]
             final_packed_items_details.append({
                 **original_package,
-                "position_x": pos[0],
-                "position_y": pos[1],
-                "position_z": pos[2]
+                "position_x": pos[0], "position_y": pos[1], "position_z": pos[2]
             })
             total_packed_volume += original_package['volume']
             total_packed_service_time += original_package['service_time']
@@ -120,17 +119,13 @@ def solve_loading_problem(algorithm_name, capacity_cm3, packages_info):
     return {
         'algorithm_name': algorithm_name,
         'metrics': {
-            'computation_time': computation_time,
-            'memory_usage_mb': round(mem_usage, 2),
-            'volume_utilization': best_fitness[0],
-            'relocation_count': best_fitness[1],
+            'computation_time': computation_time, 'memory_usage_mb': round(mem_usage, 2),
+            'volume_utilization': best_fitness[0], 'relocation_count': best_fitness[1],
             'unloading_feasibility': "Feasible" if best_fitness[1] != float('inf') else "Infeasible",
             'unloading_sequence_length': best_fitness[2]
         },
         'packed_items': final_packed_items_details,
         'vehicle_info': {
-            # Note: We pass vehicle_info's capacity, not just capacity_cm3,
-            # to keep all vehicle details together.
             **vehicle_info,
             'num_packages_loaded': len(final_packed_items_details),
             'total_packed_volume': round(total_packed_volume),

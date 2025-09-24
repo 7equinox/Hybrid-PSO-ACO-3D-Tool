@@ -29,7 +29,7 @@ def get_vehicle_data():
         capacity_cm3 = float(data.get('capacity'))
         # Get page and page_size from the request, with default values
         page = data.get('page', 1)
-        page_size = 100 # A reasonable chunk size
+        page_size = 1 # A reasonable chunk size
 
         # The data_loader now handles pagination
         vehicle_info, packages_info = load_data(capacity_cm3, page=page, page_size=page_size)
@@ -52,8 +52,7 @@ def simulate():
         data = request.get_json()
         algorithm_name = data.get('algorithm')
         capacity_cm3 = float(data.get('capacity'))
-        # IMPORTANT: The solver now receives the full package list from the frontend
-        # This avoids the server having to reload and re-process all data again.
+        # IMPORTANT: It receives the package list from the frontend again
         all_packages = data.get('packages')
 
         if not all_packages:
@@ -61,9 +60,7 @@ def simulate():
 
         print(f"Starting simulation for {algorithm_name} with {len(all_packages)} packages...")
         
-        # We need to adapt the solver to accept the package list directly
-        # For now, let's assume it's adapted. You will need to modify `solve_loading_problem`.
-        # Passing `all_packages` to the solver is more efficient.
+        # It passes all 3 arguments to the solver
         results = solve_loading_problem(algorithm_name, capacity_cm3, all_packages)
 
         print("Simulation finished. Sending results to frontend.")

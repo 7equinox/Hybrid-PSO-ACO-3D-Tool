@@ -1,89 +1,104 @@
-# HYBRID-PSO-ACO-3D-TOOL
+# HYBRID PSO-ACO 3D LOADING OPTIMIZATION TOOL
 
-This repository contains the source code for the research project titled: "OPTIMIZING DYNAMIC 3D LOADING AND UNLOADING FOR DELIVERY VEHICLES USING HYBRID PARTICLE SWARM AND ANT COLONY ALGORITHM".
+This project provides an interactive, experimental software tool developed for the research titled: **"OPTIMIZING DYNAMIC 3D LOADING AND UNLOADING FOR DELIVERY VEHICLES USING HYBRID PARTICLE SWARM AND ANT COLONY ALGORITHM"**.
 
-The tool provides a web-based interface to simulate and compare the performance of three optimization algorithms—Particle Swarm Optimization (PSO), Ant Colony Optimization (ACO), and a hybrid PSO-ACO—on a 3D vehicle loading problem using the 2021 Amazon Last Mile Routing Research Challenge Dataset.
+It allows for the direct simulation and comparison of three metaheuristic algorithms—Particle Swarm Optimization (PSO), Ant Colony Optimization (ACO), and a proposed hybrid PSO-ACO—in solving complex 3D vehicle loading problems.
 
-## Prerequisites
+---
 
-Before running the application, ensure you have the following installed:
+## 1. Addressing the Research Problem
 
-1.  **Python 3.8+**: The backend is built using Python.
-2.  **Pip**: Python's package installer is required to install dependencies.
-3.  **Virtual Environment (Recommended)**: To maintain a clean project environment, it's highly recommended to use a virtual environment.
+The core purpose of this tool is to provide a platform to answer the study's central **Statement of the Problem**. Existing algorithms often focus solely on packing density (volume utilization) while neglecting the practical challenges of unloading items in a specific sequence. This leads to inefficient operations, unnecessary item relocations, and sometimes even inaccessible (infeasible) loads.
 
-## Installation and Setup
+This software directly addresses these gaps by:
 
-1.  **Clone the repository or download the source code.**
+*   **Measuring Operational Viability:** It goes beyond simple packing and simulates the unloading process to calculate critical metrics like **Relocation Count**, **Unloading Feasibility**, and **Unloading Sequence Length**.
+*   **Enabling Direct Comparison:** The tool allows users to run standalone PSO, standalone ACO, and the proposed Hybrid PSO-ACO on the exact same problem instance, generating the data needed to answer **Research Questions 1 & 2** regarding loading and unloading optimality.
+*   **Testing Scalability:** By allowing simulations across various real-world vehicle capacities from the Amazon dataset, the tool measures **Computation Time** and **Memory Usage**, directly addressing **Research Question 3** on algorithm scalability.
+*   **Simulating Dynamic Conditions:** It incorporates a "dynamic constraint" where 10-20% of items are randomly altered post-selection, mimicking real-world disruptions like last-minute order changes and testing the algorithms' robustness.
 
-2.  **Navigate to the project directory:**
+---
+
+## 2. Alignment with System Architecture (Chapter 3)
+
+The software's architecture is a direct implementation of the designs outlined in Chapter 3 of the research methodology.
+
+### Particle Swarm Optimization (PSO) - (Figure 4)
+*   **Implemented in:** `backend/algorithms/pso_algorithm.py`
+*   **Logic:** The `runPsoAlgorithm` function follows the PSO flowchart precisely. It initializes a "swarm" of "particles," where each particle is a potential packing sequence. In each iteration, it evaluates each particle's fitness, updates its Personal Best (`pbest`), and updates the Global Best (`gbest`). The `updateParticle` function then calculates a new "velocity" (a series of swaps) to move the particle towards promising solutions.
+
+### Ant Colony Optimization (ACO) - (Figure 5)
+*   **Implemented in:** `backend/algorithms/aco_algorithm.py`
+*   **Logic:** The `runAcoAlgorithm` function mimics the behavior of ants. It initializes an "ant population" that traverses paths to construct solutions. After each iteration, "pheromones" are evaporated and then deposited on the paths of the best solutions, reinforcing better sequences. The `construct_solution` function uses these pheromone trails to guide subsequent ants.
+
+### Hybrid PSO-ACO Algorithm - (Figure 6)
+*   **Implemented in:** `backend/algorithms/hybrid_pso_aco_algorithm.py`
+*   **Logic:** This implementation embodies the Pheromone-Augmented Particle Swarm Optimization (PACO) framework. It follows the PSO structure but integrates a key ACO mechanism:
+    *   **Pheromone Influence on Velocity:** The `update_particle_hybrid` function contains an augmented velocity equation. A particle's movement is now influenced not just by its `pbest` and the `gbest`, but also by the pheromone matrix, guiding it towards historically successful item orderings.
+    *   **Weighted Pheromone Update:** As shown in the yellow box of the hybrid flowchart, after each generation, the top-performing particles (the "elites") are ranked. Their success is used to deposit pheromones, reinforcing the trails that lead to high-quality, unload-feasible solutions. This creates a feedback loop where PSO's global search informs ACO's local memory, and vice versa.
+
+---
+
+## 3. Pre-requisites
+
+*   Python 3.8 or newer
+*   `pip` (Python package installer)
+*   Git (for cloning the repository)
+
+---
+
+## 4. Installation and Setup
+
+1.  **Clone the Repository:**
     ```bash
+    git clone [Your Repository URL]
     cd HYBRID-PSO-ACO-3D-TOOL
     ```
 
-3.  **Create and activate a virtual environment:**
-    *   **Windows:**
-        ```bash
-        python -m venv venv
-        .\venv\Scripts\activate
-        ```
-    *   **macOS/Linux:**
-        ```bash
-        python3 -m venv venv
-        source venv/bin/activate
-        ```
-
-4.  **Install the required dependencies from `requirements.txt`:**
+2.  **Install Dependencies:**
+    It is highly recommended to use a virtual environment.
     ```bash
+    # Create and activate a virtual environment (optional but recommended)
+    python -m venv venv
+    source venv/bin/activate  # On Windows, use `venv/Scripts/activate`
+
+    # Install the required Python libraries
     pip install -r requirements.txt
     ```
 
-## How to Run the Tool
+3.  **Dataset:**
+    *   The project is pre-configured to use small **sample data** located in `backend/sample_data/`. This allows the tool to run immediately for demonstration purposes.
+    *   To use the full **2021 Amazon Last Mile Routing Research Challenge Dataset**, you must download it and place the contents into the `backend/almrrc2021/` directory. Then, you will need to comment out the sample data paths and uncomment the real data paths in `backend/data_management/data_loader.py`.
 
-1.  **Ensure you are in the root directory (`HYBRID-PSO-ACO-3D-TOOL/`) and your virtual environment is activated.**
+---
 
-2.  **Run the Flask application:**
-    ```bash
-    python backend/app.py
-    ```
+## 5. Running the Application
 
-3.  **Open your web browser and navigate to the following address:**
-    [http://127.0.0.1:5000](http://127.0.0.1:5000)
+Once the setup is complete, you can start the web server from the project's root directory:
 
-4.  **Using the Interface:**
-    *   Click on the "Modify Simulation" gear icon to open the simulation settings modal.
-    *   Choose the desired **Optimization Algorithm** and **Vehicle Volume Capacity**.
-    *   Click the "Simulate" button to run the optimization process. The backend will execute the selected algorithm, and the results (metrics and packed item list) will be displayed on the right-hand side of the screen. The initial dataset for the selected vehicle will appear on the left.
+```bash
+python backend/app.py
+```
 
-## Alignment with Research Methodology (Chapter 3)
+Open a web browser and navigate to `http://127.0.0.1:5000` to access the tool.
 
-This tool is a direct implementation of the methodology described in Chapter 3 of the research paper.
+### How to Use:
 
-*   **System Architecture:**
-    *   `backend/algorithms/pso.py`: Implements the standalone Particle Swarm Optimization algorithm as visualized in Figure 5.
-    *   `backend/algorithms/aco.py`: Implements the standalone Ant Colony Optimization algorithm as visualized in Figure 6.
-    *   `backend/algorithms/hybrid_pso_aco.py`: Implements the proposed hybrid Pheromone-Augmented Particle Swarm Optimization (PACO) as detailed in Figure 7. It integrates the pheromone update mechanism from ACO directly into the PSO velocity update loop.
+1.  Click the **"Modify Simulation"** button.
+2.  Select an **Optimization Algorithm** (PSO, ACO, or PSO-ACO).
+3.  Choose a **Vehicle Volume Capacity** from the dropdown. The application will begin loading all associated package data. You can cancel this loading process at any time.
+4.  Once loading is complete (or canceled), click the **"Simulate"** button to run the experiment.
+5.  The results, including all scalability and loading/unloading metrics, will be displayed on the right-hand side.
 
-*   **Dataset and Data Preparation:**
-    *   `backend/utils/data_loader.py`: Handles the "Dataset Preparation" phase by loading and parsing the specified `eval_route_data.json` and `eval_package_data.json` files from the Amazon dataset. It filters packages based on the selected vehicle capacity.
+---
 
-*   **Experimentation Stage:**
-    *   The `/simulate` endpoint in `backend/app.py` orchestrates the "Experimentation Stage." Although the frontend triggers a single run for visualization, the underlying structure is built to be extendable for the 30 independent runs required for statistical analysis.
-    *   The "Dynamic Constraint" (last-minute item insertion/removal) is handled within the `problem_solver.py` module, which re-optimizes the solution after the change.
+## 6. Directory Structure
 
-*   **Performance Metrics:**
-    *   `backend/utils/metrics_calculator.py`: This module is dedicated to calculating all the dependent variables outlined in the methodology:
-        *   **Loading/Unloading Metrics (RQ1 & RQ2):** Volume Utilization, Relocation Count, Unloading Feasibility, and Unloading Sequence Length.
-        *   **Scalability Metrics (RQ3):** Computation time and Memory Usage are measured using Python's `time` and `memory_profiler` modules.
-
-## Answering the Statement of the Problem
-
-This tool was designed specifically to address the core research questions and test the stated hypotheses.
-
-1.  **Addresses the Core Problem:** The tool tackles the challenge of optimizing 3D loading while considering the often-neglected **unloading feasibility**. The unloading simulation within `metrics_calculator.py` explicitly calculates relocations and sequence length, providing a quantitative measure of how easily items can be retrieved.
-
-2.  **Enables Comparison:** By allowing the user to seamlessly switch between standalone PSO, ACO, and the hybrid algorithm, the tool provides the direct comparison needed to answer RQ1, RQ2, and RQ3. The displayed metrics allow for a direct performance assessment.
-
-3.  **Provides Data for Hypothesis Testing:** The quantitative output from each simulation run (computation time, memory usage, volume utilization, etc.) is the raw data required for the statistical analyses described in the methodology (ANOVA, Tukey's HSD, Chi-Square). By running simulations across different vehicle capacities, a researcher can gather the necessary data to accept or reject the null hypotheses H₀₁, H₀₂, and H₀₃, thereby determining if the proposed hybrid algorithm offers a statistically significant improvement.
-
-4.  **Demonstrates Superiority of the Hybrid Algorithm:** The `hybrid_pso_aco.py` implementation is designed to outperform the standalone versions by leveraging PSO's global search capabilities while using ACO's pheromone trails to guide particles toward historically successful regions of the search space. This prevents premature convergence on suboptimal solutions and results in packing configurations that are not only dense but also optimized for efficient unloading.
+-   `backend/`: Contains all server-side Python logic.
+    -   `algorithms/`: Implementation of the three core optimization algorithms (PSO, ACO, Hybrid).
+    -   `data_management/`: Handles loading, preprocessing, and caching of the dataset.
+    -   `simulation/`: Orchestrates the simulation runs and calculates performance metrics.
+    -   `sample_data/`: A small subset of the data for quick testing.
+-   `static/`: Contains the CSS and JavaScript files for the frontend.
+-   `templates/`: Contains the `index.html` file for the user interface.
+-   `requirements.txt`: A list of all Python dependencies.

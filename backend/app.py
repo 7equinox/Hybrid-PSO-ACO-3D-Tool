@@ -52,7 +52,7 @@ def getVehicleData():
         obj_data = request.get_json()
         flt_capacityCm3 = float(obj_data.get('capacity'))
         int_page = obj_data.get('page', 1)
-        int_pageSize = 1 # A small page size allows for incremental loading display.
+        int_pageSize = 100 # A small page size allows for incremental loading display.
 
         # The data loader handles memory management efficiently via caching.
         dict_vehicleInfo, arr_packagesInfo = loadDataForVehicle(

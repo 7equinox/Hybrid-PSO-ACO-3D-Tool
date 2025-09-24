@@ -23,7 +23,6 @@ import gc
 
 # --- Global Constants for File Paths and Cache Directory ---
 g_str_baseDir = os.path.dirname(os.path.abspath(__file__))
-print(g_str_baseDir)
 g_str_routeDataPath = os.path.join(g_str_baseDir, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_route_data.json')
 g_str_packageDataPath = os.path.join(g_str_baseDir, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_package_data.json')
 

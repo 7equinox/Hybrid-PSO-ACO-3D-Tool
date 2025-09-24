@@ -10,6 +10,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Correctly import from respective modules
+# NO CHANGES here, as the function signatures from the outside remain the same.
 from backend.utils.data_loader import get_all_vehicle_capacities, load_data
 from backend.utils.problem_solver import solve_loading_problem
 
@@ -18,20 +19,29 @@ app = Flask(__name__, template_folder='../templates', static_folder='../static')
 
 @app.route('/')
 def index():
+    """
+    COMMENT: This route now calls `get_all_vehicle_capacities` which is designed
+    to load, use, and then immediately release the large dataset,
+    preventing long-term memory usage.
+    """
     capacities = get_all_vehicle_capacities()
     return render_template('index.html', capacities=capacities)
 
-# MODIFIED API to fetch paginated data
 @app.route('/get_vehicle_data', methods=['POST'])
 def get_vehicle_data():
+    """
+    COMMENT: The logic here is perfectly fine. It calls our modified `load_data` function.
+    The memory-intensive part (cache creation) happens inside `load_data` only once
+    per session and the memory is released right after.
+    """
     try:
         data = request.get_json()
         capacity_cm3 = float(data.get('capacity'))
-        # Get page and page_size from the request, with default values
         page = data.get('page', 1)
-        page_size = 1 # A reasonable chunk size
+        # Setting a small page size is good for incremental loading display on the frontend.
+        page_size = 100
 
-        # The data_loader now handles pagination
+        # The data_loader now handles caching and memory management efficiently.
         vehicle_info, packages_info = load_data(capacity_cm3, page=page, page_size=page_size)
         
         if not vehicle_info:
@@ -45,22 +55,26 @@ def get_vehicle_data():
         print(f"Error in /get_vehicle_data: {e}")
         return jsonify({'error': str(e)}), 500
 
-# MODIFIED Simulation endpoint to now accept the full list of packages from the frontend
 @app.route('/simulate', methods=['POST'])
 def simulate():
+    """
+    COMMENT: No changes needed. This function correctly receives the package list
+    from the frontend. Whether the user cancelled loading or it completed,
+    this endpoint simply gets the final list, which is very memory efficient.
+    The `solve_loading_problem` also doesn't load data anymore, so this is clean.
+    """
     try:
         data = request.get_json()
         algorithm_name = data.get('algorithm')
         capacity_cm3 = float(data.get('capacity'))
-        # IMPORTANT: It receives the package list from the frontend again
-        all_packages = data.get('packages')
+        all_packages = data.get('packages') # Receives the list (complete or partial) from the frontend
 
         if not all_packages:
             return jsonify({'error': 'Package data is required for simulation.'}), 400
 
         print(f"Starting simulation for {algorithm_name} with {len(all_packages)} packages...")
         
-        # It passes all 3 arguments to the solver
+        # Passes all necessary arguments to the solver.
         results = solve_loading_problem(algorithm_name, capacity_cm3, all_packages)
 
         print("Simulation finished. Sending results to frontend.")
@@ -70,4 +84,5 @@ def simulate():
         return jsonify({'error': f'An internal error occurred: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Using threaded=False is often better for debugging and predictable behavior without a multi-threaded design.
+    app.run(host='0.0.0.0', port=5000, debug=True, threaded=False)

@@ -5,35 +5,27 @@ import random
 from memory_profiler import memory_usage
 from py3dbp import Packer, Bin, Item
 
-# --- CORRECTED IMPORT ---
-# Import the DEDICATED function for loading cached data for the simulation.
-from backend.utils.data_loader import get_vehicle_info_only 
+from backend.utils.data_loader import get_vehicle_info_only
 from backend.utils.metrics_calculator import calculate_all_metrics
 from backend.algorithms.pso import run_pso
 from backend.algorithms.aco import run_aco
 from backend.algorithms.hybrid_pso_aco import run_hybrid_pso_aco
 
-# --- FUNCTION SIGNATURE CORRECTED back to 2 arguments ---
 def solve_loading_problem(algorithm_name, capacity_cm3, packages_info):
     """
-    Main orchestrator function. Now uses a dedicated fast loader that reads
-    from the pre-filtered cache file, ensuring the simulation starts quickly.
+    Main orchestrator function.
     """
-    
-    # Stage 1: Get ONLY the vehicle info. This is extremely fast.
     vehicle_info = get_vehicle_info_only(capacity_cm3)
     
     if not vehicle_info or not packages_info:
         return {'error': 'Could not get vehicle info or package data was missing.'}
         
-    # Stage 2: Apply Dynamic Constraint to the provided list
     if len(packages_info) > 1:
         num_to_remove = int(len(packages_info) * random.uniform(0.1, 0.2))
         packages_to_load = random.sample(packages_info, len(packages_info) - num_to_remove)
     else:
         packages_to_load = packages_info
 
-    # Prepare data for the py3dbp library.
     items_to_pack = [
         Item(p['id'], p['width'], p['height'], p['depth'], 1) for p in packages_to_load
     ]
@@ -43,13 +35,11 @@ def solve_loading_problem(algorithm_name, capacity_cm3, packages_info):
         vehicle_info['width'], 
         vehicle_info['height'], 
         vehicle_info['depth'], 
-        1e6 # Max weight is not a constraint.
+        1e6
     )
 
-    # The Fitness Function (unchanged)
     def evaluate_solution(item_order_indices):
         packer = Packer()
-        # Create a fresh bin for each evaluation
         fresh_bin = Bin(the_bin.name, the_bin.width, the_bin.height, the_bin.depth, the_bin.max_weight)
         packer.add_bin(fresh_bin)
 
@@ -80,7 +70,6 @@ def solve_loading_problem(algorithm_name, capacity_cm3, packages_info):
             metrics['unloading_sequence_length']
         )
     
-    # Stage 3: Select and execute the chosen optimization algorithm (unchanged).
     algorithm_map = {'PSO': run_pso, 'ACO': run_aco, 'PSO-ACO': run_hybrid_pso_aco}
     algo_func = algorithm_map.get(algorithm_name)
 
@@ -88,13 +77,15 @@ def solve_loading_problem(algorithm_name, capacity_cm3, packages_info):
         return {'error': 'Invalid algorithm name specified.'}
 
     start_time = time.time()
+    
+    # --- MODIFIED: Pass `packages_to_load` to the algorithm ---
+    # Ang mga algorithm ay nangangailangan na ngayon ng impormasyon ng package para sa service time heuristic.
     mem_usage, (best_solution_indices, best_fitness) = memory_usage(
-        (algo_func, (items_to_pack, evaluate_solution)),
+        (algo_func, (items_to_pack, packages_to_load, evaluate_solution)), # <-- We now pass 3 arguments
         retval=True, max_usage=True, interval=0.1
     )
     computation_time = round(time.time() - start_time, 2)
     
-    # Stage 4: Process and return the final, optimized solution (unchanged).
     final_packer = Packer()
     final_packer.add_bin(the_bin)
     for i in best_solution_indices:

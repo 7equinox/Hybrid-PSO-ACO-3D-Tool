@@ -39,7 +39,7 @@ def get_vehicle_data():
         capacity_cm3 = float(data.get('capacity'))
         page = data.get('page', 1)
         # Setting a small page size is good for incremental loading display on the frontend.
-        page_size = 100
+        page_size = 1
 
         # The data_loader now handles caching and memory management efficiently.
         vehicle_info, packages_info = load_data(capacity_cm3, page=page, page_size=page_size)

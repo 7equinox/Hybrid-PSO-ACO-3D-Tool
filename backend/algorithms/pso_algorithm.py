@@ -19,8 +19,9 @@ import random
 import numpy as np
 from deap import base, tools
 from .base_algorithm import creator # Import the base creator definitions
+from backend.simulation.exceptions import CancelledException
 
-def runPsoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution,
+def runPsoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution, cancellation_flag,
                     int_numParticles=30, int_maxGenerations=50):
     """
     Executes the complete standalone PSO algorithm.
@@ -48,26 +49,37 @@ def runPsoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution,
 
     # --- ITERATIVE OPTIMIZATION LOOP ---
     # This loop represents the core cycle of the PSO algorithm.
-    for _ in range(int_maxGenerations):
-        # 1. Evaluate Fitness & Update Personal Best (pBest) for each particle.
-        for obj_particle in list_swarm:
-            # The fitness is evaluated only if it hasn't been calculated before.
-            if not obj_particle.fitness.valid:
-                obj_particle.fitness.values = obj_toolbox.evaluate(obj_particle)
+    try:
+        for gen in range(int_maxGenerations):
+            # NEW: Check for cancellation at the start of each generation.
+            if cancellation_flag['is_cancelled']:
+                raise CancelledException()
+                
+            print(f"PSO Generation: {gen + 1}/{int_maxGenerations}")
+            # 1. Evaluate Fitness & Update Personal Best (pBest) for each particle.
+            for obj_particle in list_swarm:
+                # The fitness is evaluated only if it hasn't been calculated before.
+                if not obj_particle.fitness.valid:
+                    obj_particle.fitness.values = obj_toolbox.evaluate(obj_particle)
 
-            # If the particle's current position is better than its personal best, update it.
-            if not obj_particle.pbest or obj_particle.pbest.fitness < obj_particle.fitness:
-                obj_particle.pbest = creator.Particle(obj_particle)
-                obj_particle.pbest.fitness.values = obj_particle.fitness.values
+                # If the particle's current position is better than its personal best, update it.
+                if not obj_particle.pbest or obj_particle.pbest.fitness < obj_particle.fitness:
+                    obj_particle.pbest = creator.Particle(obj_particle)
+                    obj_particle.pbest.fitness.values = obj_particle.fitness.values
 
-            # 2. Update Global Best (gBest) for the entire swarm.
-            if not obj_gbest or obj_gbest.fitness < obj_particle.fitness:
-                obj_gbest = creator.Particle(obj_particle)
-                obj_gbest.fitness.values = obj_particle.fitness.values
+                # 2. Update Global Best (gBest) for the entire swarm.
+                if not obj_gbest or obj_gbest.fitness < obj_particle.fitness:
+                    obj_gbest = creator.Particle(obj_particle)
+                    obj_gbest.fitness.values = obj_particle.fitness.values
 
-        # 3. Compute Velocity and Update Particle Position.
-        for obj_particle in list_swarm:
-            obj_toolbox.update(obj_particle, obj_gbest)
+            # 3. Compute Velocity and Update Particle Position.
+            for obj_particle in list_swarm:
+                obj_toolbox.update(obj_particle, obj_gbest)
+
+    except CancelledException:
+        # If the custom exception is caught, exit gracefully.
+        print("PSO algorithm was cancelled.")
+        return obj_gbest, obj_gbest.fitness.values if obj_gbest else (0, float('inf'), float('inf'))
 
     return obj_gbest, obj_gbest.fitness.values
 

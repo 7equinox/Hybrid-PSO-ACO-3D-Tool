@@ -20,8 +20,9 @@ import random
 import numpy as np
 from deap import base, tools
 from .base_algorithm import creator
+from backend.simulation.exceptions import CancelledException
 
-def runHybridPsoAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution,
+def runHybridPsoAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution, cancellation_flag,
                            int_numParticles=30, int_maxGenerations=50, flt_evaporationRate=0.2):
     """
     Executes the proposed Pheromone-Augmented Particle Swarm Optimization (PACO) algorithm.
@@ -51,40 +52,52 @@ def runHybridPsoAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution,
                          service_times=arr_serviceTimes, phi1=1.5, phi2=1.5, phi3=2.0, phi4=1.5)
 
     # --- HYBRID OPTIMIZATION LOOP ---
-    for _ in range(int_maxGenerations):
-        # 1. Evaluate fitness and update pBest/gBest (Standard PSO Step)
-        for obj_particle in list_swarm:
-            if not obj_particle.fitness.valid:
-                obj_particle.fitness.values = obj_toolbox.evaluate(obj_particle)
+    try:
+        for gen in range(int_maxGenerations):
+            # NEW: Check for a cancellation request at the start of each generation.
+            if cancellation_flag['is_cancelled']:
+                raise CancelledException()
 
-            if not obj_particle.pbest or obj_particle.pbest.fitness < obj_particle.fitness:
-                obj_particle.pbest = creator.Particle(obj_particle)
-                obj_particle.pbest.fitness.values = obj_particle.fitness.values
+            print(f"Hybrid PSO-ACO Generation: {gen + 1}/{int_maxGenerations}")
 
-            if not obj_gbest or obj_gbest.fitness < obj_particle.fitness:
-                obj_gbest = creator.Particle(obj_particle)
-                obj_gbest.fitness.values = obj_particle.fitness.values
-        
-        # --- WEIGHTED PHEROMONE UPDATE (ACO Integration) ---
-        # This is the core feedback mechanism shown in the yellow box of the hybrid flowchart.
-        
-        # 2. Evaporate pheromones
-        mtr_pheromoneMatrix *= (1 - flt_evaporationRate)
-        
-        # 3. Rank particles and deposit pheromones based on elite performance.
-        list_sortedSwarm = sorted(list_swarm, key=lambda p: p.fitness.values[0], reverse=True)
-        int_numElites = max(1, int(0.2 * len(list_swarm))) # Top 20% are elites.
+            # 1. Evaluate fitness and update pBest/gBest (Standard PSO Step)
+            for obj_particle in list_swarm:
+                if not obj_particle.fitness.valid:
+                    obj_particle.fitness.values = obj_toolbox.evaluate(obj_particle)
 
-        # Only the best-performing particles are allowed to reinforce the pheromone trail.
-        for obj_eliteParticle in list_sortedSwarm[:int_numElites]:
-            flt_depositAmount = obj_eliteParticle.fitness.values[0] # Deposit based on quality.
-            if (flt_depositAmount > 0 and len(obj_eliteParticle) > 1):
-                for i in range(int_numItems - 1):
-                    mtr_pheromoneMatrix[obj_eliteParticle[i]][obj_eliteParticle[i+1]] += flt_depositAmount
+                if not obj_particle.pbest or obj_particle.pbest.fitness < obj_particle.fitness:
+                    obj_particle.pbest = creator.Particle(obj_particle)
+                    obj_particle.pbest.fitness.values = obj_particle.fitness.values
 
-        # 4. Update Particle Velocity with Pheromone Influence
-        for obj_particle in list_swarm:
-            obj_toolbox.update(obj_particle, obj_gbest)
+                if not obj_gbest or obj_gbest.fitness < obj_particle.fitness:
+                    obj_gbest = creator.Particle(obj_particle)
+                    obj_gbest.fitness.values = obj_particle.fitness.values
+            
+            # --- WEIGHTED PHEROMONE UPDATE (ACO Integration) ---
+            # This is the core feedback mechanism shown in the yellow box of the hybrid flowchart.
+            
+            # 2. Evaporate pheromones
+            mtr_pheromoneMatrix *= (1 - flt_evaporationRate)
+            
+            # 3. Rank particles and deposit pheromones based on elite performance.
+            list_sortedSwarm = sorted(list_swarm, key=lambda p: p.fitness.values[0], reverse=True)
+            int_numElites = max(1, int(0.2 * len(list_swarm))) # Top 20% are elites.
+
+            # Only the best-performing particles are allowed to reinforce the pheromone trail.
+            for obj_eliteParticle in list_sortedSwarm[:int_numElites]:
+                flt_depositAmount = obj_eliteParticle.fitness.values[0] # Deposit based on quality.
+                if (flt_depositAmount > 0 and len(obj_eliteParticle) > 1):
+                    for i in range(int_numItems - 1):
+                        mtr_pheromoneMatrix[obj_eliteParticle[i]][obj_eliteParticle[i+1]] += flt_depositAmount
+
+            # 4. Update Particle Velocity with Pheromone Influence
+            for obj_particle in list_swarm:
+                obj_toolbox.update(obj_particle, obj_gbest)
+
+    except CancelledException:
+        # If the process is cancelled, log it and return the best result found so far.
+        print("Hybrid PSO-ACO algorithm was cancelled.")
+        return obj_gbest, obj_gbest.fitness.values if obj_gbest else (0, float('inf'), float('inf'))
 
     return obj_gbest, obj_gbest.fitness.values
 

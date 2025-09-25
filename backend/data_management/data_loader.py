@@ -23,12 +23,12 @@ import gc
 
 # --- Global Constants for File Paths and Cache Directory ---
 g_str_baseDir = os.path.dirname(os.path.abspath(__file__))
-# g_str_routeDataPath = os.path.join(g_str_baseDir, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_route_data.json')
-# g_str_packageDataPath = os.path.join(g_str_baseDir, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_package_data.json')
+g_str_routeDataPath = os.path.join(g_str_baseDir, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_route_data.json')
+g_str_packageDataPath = os.path.join(g_str_baseDir, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_package_data.json')
 
 # Use smaller sample data for development and demonstration.
-g_str_routeDataPath = os.path.join(g_str_baseDir, '../sample_data/test_route_data.json')
-g_str_packageDataPath = os.path.join(g_str_baseDir, '../sample_data/test_package_data.json')
+# g_str_routeDataPath = os.path.join(g_str_baseDir, '../sample_data/test_route_data.json')
+# g_str_packageDataPath = os.path.join(g_str_baseDir, '../sample_data/test_package_data.json')
 
 # Cache directory to store pre-processed data, improving performance on subsequent runs.
 g_str_dataCacheDir = os.path.join(g_str_baseDir, '..', 'data_cache')

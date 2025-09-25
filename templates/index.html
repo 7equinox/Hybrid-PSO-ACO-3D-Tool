@@ -206,8 +206,11 @@ ESTONILO, JULIUS EVAN C.
     <div id="loader" class="modal" style="display: none; background: rgba(0, 0, 0, 0.85); color: white; font-size: 24px;">
         <div class="loader-content">
             <i class="fa-solid fa-spinner fa-spin fa-3x"></i>
-            <p style="margin-top: 20px;">Running Simulation... Please Wait.</p>
-            <button id="cancel-load-btn">Cancel</button>
+            <p style="margin-top: 20px;">Please Wait...</p>
+            <!-- The data-loading cancel button is hidden by default -->
+            <button id="cancel-load-btn" style="display: none;">Cancel Loading</button>
+            <!-- The NEW simulation cancel button is also hidden by default -->
+            <button id="cancel-sim-btn" style="display: none;">Cancel Simulation</button>
         </div>
     </div>
 

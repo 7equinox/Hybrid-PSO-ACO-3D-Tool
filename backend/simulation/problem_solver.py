@@ -23,15 +23,20 @@ from py3dbp import Packer, Bin, Item
 # Import dependent modules
 from backend.data_management.data_loader import getSimulationDataForVehicle
 from backend.simulation.metrics_calculator import calculateAllMetrics
+
+# CORRECTED: Import the exception from its new, neutral location.
+from backend.simulation.exceptions import CancelledException 
+
 from backend.algorithms.pso_algorithm import runPsoAlgorithm
 from backend.algorithms.aco_algorithm import runAcoAlgorithm
 from backend.algorithms.hybrid_pso_aco_algorithm import runHybridPsoAcoAlgorithm
 
-def solveLoadingProblem(str_algorithmName, flt_capacityCm3):
+def solveLoadingProblem(str_algorithmName, flt_capacityCm3, cancellation_flag):
     """
     The main orchestrator function for a single simulation run. It fetches the
     full simulation dataset, sets up the 3D bin packing problem, invokes the
-    correct algorithm, and structures the final results.
+    correct algorithm, and structures the final results. It now accepts a cancellation flag
+    which it will check periodically and pass down to the algorithm.
     """
     dict_vehicleInfo, arr_packagesInfo = getSimulationDataForVehicle(flt_capacityCm3)
 
@@ -67,6 +72,12 @@ def solveLoadingProblem(str_algorithmName, flt_capacityCm3):
     # potential solution (an ordering of items), simulates packing, and returns
     # the multi-objective fitness values (volume, relocations, sequence length).
     def evaluateSolution(arr_itemOrderIndices):
+        # NEW: Check the cancellation flag at the start of each evaluation.
+        # Since this function is called many times, this is an effective
+        # way to catch a cancel request quickly.
+        if cancellation_flag['is_cancelled']:
+            raise CancelledException()
+
         obj_packer = Packer()
         # Create a fresh bin for each evaluation to ensure independent trials.
         obj_freshBin = Bin(obj_bin.name, obj_bin.width, obj_bin.height, obj_bin.depth, obj_bin.max_weight)
@@ -122,7 +133,8 @@ def solveLoadingProblem(str_algorithmName, flt_capacityCm3):
     # and the 'time' module captures computation time, directly addressing
     # the scalability metrics for Research Question 3.
     flt_memUsage, (arr_bestSolutionIndices, tpl_bestFitness) = memory_usage(
-        (func_algorithm, (arr_itemsToPack, arr_packagesToLoad, evaluateSolution)),
+        # MODIFICATION: Pass the cancellation flag to the selected algorithm.
+        (func_algorithm, (arr_itemsToPack, arr_packagesToLoad, evaluateSolution, cancellation_flag)),
         retval=True, max_usage=True, interval=0.1
     )
     flt_computationTime = round(time.time() - tm_startTime, 2)

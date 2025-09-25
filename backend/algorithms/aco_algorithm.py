@@ -17,8 +17,9 @@ ESTONILO, JULIUS EVAN C.
 """
 import random
 import numpy as np
+from backend.simulation.exceptions import CancelledException
 
-def runAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution,
+def runAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution, cancellation_flag,
                     int_numAnts=20, int_maxGenerations=50,
                     flt_alpha=1.0, flt_beta=2.0, flt_evaporationRate=0.5):
     """
@@ -41,40 +42,52 @@ def runAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution,
 
     # --- ITERATIVE OPTIMIZATION LOOP ---
     # Represents the core cycle of the ACO algorithm.
-    for _ in range(int_maxGenerations):
-        arr_allAntSolutions = []
-        # 1. Distribute Ants & Traverse Paths
-        for _ in range(int_numAnts):
-            # Each ant constructs a solution (item permutation) probabilistically.
-            arr_solution = _constructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, flt_alpha, flt_beta)
-            if not arr_solution: continue
+    try:
+        for gen in range(int_maxGenerations):
+            # NEW: Check for a cancellation request at the start of each generation.
+            if cancellation_flag['is_cancelled']:
+                raise CancelledException()
 
-            # Evaluate the fitness of the constructed solution.
-            tpl_fitness = func_evaluateSolution(arr_solution)
-            arr_allAntSolutions.append((arr_solution, tpl_fitness))
+            print(f"ACO Generation: {gen + 1}/{int_maxGenerations}")
 
-            # Update the best solution found across all generations.
-            # A proper multi-objective check is used here.
-            is_better = (tpl_fitness[0] >= tpl_bestFitnessEver[0] and
-                         tpl_fitness[1] <= tpl_bestFitnessEver[1] and
-                         tpl_fitness[2] <= tpl_bestFitnessEver[2] and
-                         (tpl_fitness[0] > tpl_bestFitnessEver[0] or
-                          tpl_fitness[1] < tpl_bestFitnessEver[1] or
-                          tpl_fitness[2] < tpl_bestFitnessEver[2]))
-            if is_better:
-                arr_bestSolutionEver = arr_solution
-                tpl_bestFitnessEver = tpl_fitness
+            arr_allAntSolutions = []
+            # 1. Distribute Ants & Traverse Paths
+            for _ in range(int_numAnts):
+                # Each ant constructs a solution (item permutation) probabilistically.
+                arr_solution = _constructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, flt_alpha, flt_beta)
+                if not arr_solution: continue
 
-        # --- UPDATE PHEROMONE TRAIL ---
-        # 2. Evaporate Pheromones: Reduces the influence of old trails.
-        mtr_pheromones *= (1 - flt_evaporationRate)
+                # Evaluate the fitness of the constructed solution.
+                tpl_fitness = func_evaluateSolution(arr_solution)
+                arr_allAntSolutions.append((arr_solution, tpl_fitness))
 
-        # 3. Deposit Pheromones: Reinforces paths that led to good solutions.
-        for arr_solution, tpl_fitness in arr_allAntSolutions:
-            flt_pheromoneDeposit = tpl_fitness[0] # Deposit is proportional to volume utilization.
-            if flt_pheromoneDeposit > 0:
-                for i in range(int_numItems - 1):
-                    mtr_pheromones[arr_solution[i]][arr_solution[i+1]] += flt_pheromoneDeposit
+                # Update the best solution found across all generations.
+                # A proper multi-objective check is used here.
+                is_better = (tpl_fitness[0] >= tpl_bestFitnessEver[0] and
+                            tpl_fitness[1] <= tpl_bestFitnessEver[1] and
+                            tpl_fitness[2] <= tpl_bestFitnessEver[2] and
+                            (tpl_fitness[0] > tpl_bestFitnessEver[0] or
+                            tpl_fitness[1] < tpl_bestFitnessEver[1] or
+                            tpl_fitness[2] < tpl_bestFitnessEver[2]))
+                if is_better:
+                    arr_bestSolutionEver = arr_solution
+                    tpl_bestFitnessEver = tpl_fitness
+
+            # --- UPDATE PHEROMONE TRAIL ---
+            # 2. Evaporate Pheromones: Reduces the influence of old trails.
+            mtr_pheromones *= (1 - flt_evaporationRate)
+
+            # 3. Deposit Pheromones: Reinforces paths that led to good solutions.
+            for arr_solution, tpl_fitness in arr_allAntSolutions:
+                flt_pheromoneDeposit = tpl_fitness[0] # Deposit is proportional to volume utilization.
+                if flt_pheromoneDeposit > 0:
+                    for i in range(int_numItems - 1):
+                        mtr_pheromones[arr_solution[i]][arr_solution[i+1]] += flt_pheromoneDeposit
+
+    except CancelledException:
+        # If the process is cancelled, log it and return the best result found so far.
+        print("ACO algorithm was cancelled.")
+        return arr_bestSolutionEver, tpl_bestFitnessEver
 
     return arr_bestSolutionEver, tpl_bestFitnessEver
 

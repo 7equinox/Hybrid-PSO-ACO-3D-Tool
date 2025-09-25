@@ -25,6 +25,9 @@ document.addEventListener("DOMContentLoaded", () => {
     let g_arr_allLoadedPackages = [];
     let g_bln_isLoadCancelled = false;
 
+    // NEW: Variables for tracking the async simulation task.
+    let g_str_currentSimulationId = null;
+    let g_obj_pollingInterval = null;
 
     // --- DOM ELEMENT REFERENCES ---
     // Caching references to DOM elements improves performance and code readability.
@@ -34,7 +37,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const obj_runSimBtn = document.getElementById("run-sim-btn");
     const obj_loader = document.getElementById("loader");
     const obj_clearSimBtn = document.getElementById("clear-sim-btn");
+
+     // NEW: Get references to BOTH cancel buttons.
     const obj_cancelLoadBtn = document.getElementById('cancel-load-btn');
+    const obj_cancelSimBtn = document.getElementById('cancel-sim-btn');
+
     const arr_algoButtons = document.querySelectorAll(".modal-options button");
     const obj_capacitySelect = document.getElementById("vehicle-capacity-select");
     const obj_initialTableBody = document.getElementById('initial-item-table-body');
@@ -91,16 +98,15 @@ document.addEventListener("DOMContentLoaded", () => {
     /**
     * Sets the cancellation flag when the "Cancel" button in the loader is clicked.
     */
-    obj_cancelLoadBtn.addEventListener('click', () => {
-        g_bln_isLoadCancelled = true;
-    });
+    obj_cancelLoadBtn.addEventListener('click', () => { g_bln_isLoadCancelled = true; });
+
+    // NEW: Cancel SIMULATION
+    obj_cancelSimBtn.addEventListener('click', () => { _cancelSimulation(); });
 
     /**
     * Initiates the simulation process when the "Simulate" button is clicked.
     */
-    obj_runSimBtn.addEventListener("click", () => {
-        _runSimulation();
-    });
+    obj_runSimBtn.addEventListener("click", () => { _startSimulation(); });
 
     /**
     * Clears all data and reloads the page to start a new experiment.
@@ -117,7 +123,7 @@ document.addEventListener("DOMContentLoaded", () => {
     * @param {string} str_capacity - The selected vehicle capacity in cm³.
     */
     async function _loadDisplayData(str_capacity) {
-        _showLoader("Loading sample route data...");
+        _showLoader("Loading sample route data...", { showLoadCancel: true });
         _resetInitialUI();
         g_bln_isLoadCancelled = false; // Reset the cancel flag
 
@@ -157,58 +163,123 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     /**
-    * MODIFIED: Triggers the backend simulation and no longer sends package data.
+    * STARTS the simulation by calling the backend to create a background thread.
     */
-    async function _runSimulation() {
+    async function _startSimulation() {
         if (!g_str_selectedCapacity) {
             alert("Please select a vehicle capacity first.");
             return;
         }
         if (g_arr_allLoadedPackages.length === 0) {
-            alert("Please select a vehicle and wait for the sample data to load.");
+            alert("Please wait for the sample data to load before simulating.");
             return;
         }
 
         obj_modal.style.display = "none";
-        _showLoader("Running simulation... This may take a moment.");
-        obj_cancelLoadBtn.style.display = 'none';
+        // Show the simulation cancel button.
+        _showLoader("Starting simulation...", { showSimCancel: true, simCancelDisabled: true });
 
         try {
-            const obj_response = await fetch('/simulate', {
+            const obj_response = await fetch('/start_simulation', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ // Payload is now simplified
+                body: JSON.stringify({
                     algorithm: g_str_selectedAlgorithm,
                     capacity: g_str_selectedCapacity
                 }),
             });
-            const obj_results = await obj_response.json();
 
-            if (obj_results.error) {
-                alert(`Simulation Error: ${obj_results.error}`);
+            const obj_data = await obj_response.json();
+            if (obj_data.status === 'started') {
+                g_str_currentSimulationId = obj_data.simulation_id;
+                // FIX: NOW that we have an ID, ENABLE the cancel button.
+                obj_cancelSimBtn.disabled = false;
+                // Start polling every 2 seconds
+                g_obj_pollingInterval = setInterval(_checkSimulationStatus, 2000);
             } else {
-                _updateResultsUI(obj_results);
+                throw new Error("Failed to start simulation on the server.");
             }
         } catch (obj_error) {
-            console.error("Simulation failed:", obj_error);
-            alert("A critical error occurred during the simulation.");
-        } finally {
+            console.error("Error starting simulation:", obj_error);
+            alert(`Could not start simulation: ${obj_error.message}`);
             _hideLoader();
-            obj_cancelLoadBtn.style.display = 'block';
         }
     }
 
+    /**
+    * Periodically checks the status of the running simulation.
+    */
+    async function _checkSimulationStatus() {
+        if (!g_str_currentSimulationId) return;
+        
+        _showLoader(`Running simulation... (ID: ${g_str_currentSimulationId})`, { showSimCancel: true });
+
+        try {
+            const obj_response = await fetch(`/simulation_status/${g_str_currentSimulationId}`);
+            if (!obj_response.ok) { // Handles cases where the server restarts mid-simulation
+                throw new Error(`Server status check failed: ${obj_response.statusText}`);
+            }
+            const obj_data = await obj_response.json();
+            if (obj_data.status === 'completed') {
+                clearInterval(g_obj_pollingInterval);
+                _updateResultsUI(obj_data.result);
+                _hideLoader();
+                g_str_currentSimulationId = null;
+            } else if (obj_data.status === 'error') {
+                clearInterval(g_obj_pollingInterval);
+                alert(`Simulation Error: ${obj_data.result.error}`);
+                _hideLoader();
+                g_str_currentSimulationId = null;
+            } else if (obj_data.status === 'cancelled') {
+                 clearInterval(g_obj_pollingInterval);
+                 alert("Simulation has been cancelled.");
+                 _hideLoader();
+                 g_str_currentSimulationId = null;
+            }
+        } catch (error) {
+             console.error("Polling error:", error);
+             clearInterval(g_obj_pollingInterval);
+             alert("Lost connection with the server.");
+             _hideLoader();
+             g_str_currentSimulationId = null;
+        }
+    }
+    
+    /**
+     * Sends a cancel request to the backend for the current simulation.
+     */
+    async function _cancelSimulation() {
+        if (!g_str_currentSimulationId) return;
+
+        console.log(`Sending cancel request for ${g_str_currentSimulationId}`);
+        // FIX: Disable the button immediately to prevent multiple clicks.
+        obj_cancelSimBtn.disabled = true;
+        _showLoader('Cancelling simulation...', { showSimCancel: false }); // Hide button after click
+
+        try {
+            await fetch(`/cancel_simulation/${g_str_currentSimulationId}`, { method: 'POST' });
+        } catch (obj_error) {
+            console.error("Failed to send cancel request:", obj_error);
+            // The polling will eventually handle the UI cleanup even if this fails.
+        }
+    }
 
     // --- UI HELPER FUNCTIONS ---
     // These functions manipulate the DOM to display data and feedback to the user.
 
     /**
-    * Displays the loading spinner with a custom message.
-    * @param {string} [str_message="Processing..."] - The text to display below the spinner.
+    * MODIFIED: Shows the loader and conditionally displays cancel buttons.
     */
-    function _showLoader(str_message = "Processing...") {
+    function _showLoader(str_message = "Processing...", options = {}) {
         obj_loader.querySelector('p').textContent = str_message;
-        obj_cancelLoadBtn.style.display = 'block';
+        obj_cancelLoadBtn.style.display = options.showLoadCancel ? 'block' : 'none';
+        
+        // Handle simulation cancel button visibility and state
+        obj_cancelSimBtn.style.display = options.showSimCancel ? 'block' : 'none';
+        if (options.showSimCancel) {
+            obj_cancelSimBtn.disabled = !!options.simCancelDisabled;
+        }
+
         obj_loader.style.display = 'flex';
     }
 
@@ -216,6 +287,9 @@ document.addEventListener("DOMContentLoaded", () => {
     * Hides the loading spinner.
     */
     function _hideLoader() {
+        // Ensure both buttons are hidden when the loader is hidden.
+        obj_cancelLoadBtn.style.display = 'none';
+        obj_cancelSimBtn.style.display = 'none';
         obj_loader.style.display = 'none';
     }
 

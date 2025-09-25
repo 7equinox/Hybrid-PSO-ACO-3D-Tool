@@ -38,9 +38,21 @@ def solveLoadingProblem(str_algorithmName, flt_capacityCm3, cancellation_flag):
     correct algorithm, and structures the final results. It now accepts a cancellation flag
     which it will check periodically and pass down to the algorithm.
     """
-    dict_vehicleInfo, arr_packagesInfo = getSimulationDataForVehicle(flt_capacityCm3)
+    # --- IMMEDIATE PRE-EMPTIVE CHECK ---
+    # This is the key fix for the "Starting simulation..." delay.
+    # It checks for cancellation *before* attempting to load any data for the simulation.
+    if cancellation_flag['is_cancelled']:
+        raise CancelledException()
+
+    print("Simulation started: Now loading required dataset...")
+
+    # MODIFIED: Pass the cancellation_flag to getSimulationDataForVehicle.
+    # This ensures that the data preparation step of the simulation is also cancellable.
+    dict_vehicleInfo, arr_packagesInfo = getSimulationDataForVehicle(flt_capacityCm3, cancellation_flag)
 
     if (not dict_vehicleInfo or not arr_packagesInfo):
+        # Handle case where data loading itself was cancelled.
+        if cancellation_flag['is_cancelled']: raise CancelledException()
         return {'error': 'Could not get vehicle info or package data was missing.'}
 
     # --- DYNAMIC CONSTRAINT IMPLEMENTATION ---
@@ -139,6 +151,26 @@ def solveLoadingProblem(str_algorithmName, flt_capacityCm3, cancellation_flag):
     )
     flt_computationTime = round(time.time() - tm_startTime, 2)
     
+    # --- FIX FOR 'NoneType' ERROR ---
+    # If the algorithm was cancelled before finding any solution, arr_bestSolutionIndices might be None or empty.
+    # We now handle this case explicitly.
+    if not arr_bestSolutionIndices:
+        print("Algorithm returned no solution, likely due to cancellation.")
+        return {
+            'algorithm_name': str_algorithmName,
+            'metrics': {
+                'computation_time': flt_computationTime, 'memory_usage_mb': round(flt_memUsage, 2),
+                'volume_utilization': 0, 'relocation_count': 'N/A',
+                'unloading_feasibility': 'Cancelled',
+                'unloading_sequence_length': 'N/A'
+            },
+            'packed_items': [],
+            'vehicle_info': {
+                **dict_vehicleInfo, 'num_packages_loaded': 0,
+                'total_packed_volume': 0, 'total_packed_service_time': 0
+            }
+        }
+
     # --- POST-EXPERIMENTATION: DATA CONSOLIDATION ---
     # After finding the best solution, re-pack it to get the final state
     # and format all data for display and interpretation.

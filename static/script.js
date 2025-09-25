@@ -23,11 +23,12 @@ document.addEventListener("DOMContentLoaded", () => {
     let g_str_selectedAlgorithm = "PSO";
     let g_str_selectedCapacity = null;
     let g_arr_allLoadedPackages = [];
-    let g_bln_isLoadCancelled = false;
 
-    // NEW: Variables for tracking the async simulation task.
+    // NEW: Separate tracking variables for data loading and simulation.
+    let g_str_currentLoadId = null;
+    let g_obj_loadPollingInterval = null;
     let g_str_currentSimulationId = null;
-    let g_obj_pollingInterval = null;
+    let g_obj_simPollingInterval = null;
 
     // --- DOM ELEMENT REFERENCES ---
     // Caching references to DOM elements improves performance and code readability.
@@ -46,66 +47,81 @@ document.addEventListener("DOMContentLoaded", () => {
     const obj_capacitySelect = document.getElementById("vehicle-capacity-select");
     const obj_initialTableBody = document.getElementById('initial-item-table-body');
 
+    // NEW: State flags to prevent the polling function from overwriting our "cancelling" message.
+    let g_bln_load_cancellation_requested = false;
+    let g_bln_sim_cancellation_requested = false;
 
-    // --- EVENT LISTENERS INITIALIZATION ---
-    // Binds user actions (clicks, changes) to their corresponding functions.
-
-    /**
-    * Opens the simulation settings modal when the gear icon is clicked.
-    */
-    obj_openModalBtn.onclick = () => {
-        obj_modal.style.display = "flex";
-    };
+    // --- INITIALIZATION ---
+    // This is the new entry point for all page logic.
+    _loadInitialCapacities();
 
     /**
-    * Closes the simulation settings modal.
-    */
-    obj_closeModalBtn.onclick = () => {
-        obj_modal.style.display = "none";
-    };
+     * NEW: Fetches the vehicle capacity list from the new dedicated endpoint
+     * and populates the dropdown select menu.
+     */
+    async function _loadInitialCapacities() {
+        console.log("Requesting vehicle capacity list from server...");
+        // You can add a visual indicator here, e.g., disabling the select box
+        obj_capacitySelect.disabled = true;
+        // Add a temporary "Loading..." option
+        const loadingOption = new Option("Loading vehicles...", "", true, true);
+        loadingOption.disabled = true;
+        obj_capacitySelect.add(loadingOption);
 
-    /**
-    * Allows closing the modal by clicking outside of its content area.
-    */
-    window.onclick = (obj_event) => {
-        if (obj_event.target === obj_modal) {
-            obj_modal.style.display = "none";
+        try {
+            const response = await fetch('/get_all_capacities');
+            if (!response.ok) {
+                throw new Error(`Server error: ${response.statusText}`);
+            }
+            const data = await response.json();
+            
+            // Clear the "Loading..." message
+            obj_capacitySelect.innerHTML = '<option value="" disabled selected>Select Vehicle Capacity</option>';
+
+            // Populate the dropdown with the fetched capacities
+            data.capacities.forEach(capacity => {
+                const option = document.createElement('option');
+                option.value = capacity;
+                // Simple formatting for the display text
+                option.textContent = Number(capacity).toLocaleString();
+                obj_capacitySelect.appendChild(option);
+            });
+            console.log("Successfully loaded vehicle capacities.");
+
+        } catch (error) {
+            console.error("Failed to load vehicle capacities:", error);
+            // Show an error state in the dropdown
+            obj_capacitySelect.innerHTML = '<option value="" disabled selected>Error loading vehicles</option>';
+        } finally {
+            // Re-enable the select box regardless of success or failure
+            obj_capacitySelect.disabled = false;
         }
-    };
+    }
 
-    /**
-    * Attaches a click handler to each algorithm button (PSO, ACO, PSO-ACO)
-    * to update the selected algorithm state.
-    */
-    arr_algoButtons.forEach(obj_button => {
-        obj_button.addEventListener("click", () => {
+    // --- EVENT LISTENERS ---
+    obj_openModalBtn.onclick = () => { obj_modal.style.display = "flex"; };
+    obj_closeModalBtn.onclick = () => { obj_modal.style.display = "none"; };
+    window.onclick = (e) => { if (e.target === obj_modal) { obj_modal.style.display = "none"; }};
+    obj_clearSimBtn.addEventListener("click", () => { location.reload(); });
+    
+    arr_algoButtons.forEach(button => {
+        button.addEventListener("click", () => {
             arr_algoButtons.forEach(btn => btn.classList.remove("active"));
-            obj_button.classList.add("active");
-            g_str_selectedAlgorithm = obj_button.getAttribute("data-algo");
+            button.classList.add("active");
+            g_str_selectedAlgorithm = button.getAttribute("data-algo");
         });
     });
 
-    /**
-    * Triggers the data loading process when the user selects a new vehicle capacity.
-    */
-    obj_capacitySelect.addEventListener("change", (obj_event) => {
-        g_str_selectedCapacity = obj_event.target.value;
+    obj_capacitySelect.addEventListener("change", (e) => {
+        g_str_selectedCapacity = e.target.value;
         if (g_str_selectedCapacity) {
-            // It now calls the correct function for loading display data.
-            _loadDisplayData(g_str_selectedCapacity);
+            _startLoadingDisplayData(g_str_selectedCapacity);
         }
     });
-    /**
-    * Sets the cancellation flag when the "Cancel" button in the loader is clicked.
-    */
-    obj_cancelLoadBtn.addEventListener('click', () => { g_bln_isLoadCancelled = true; });
-
-    // NEW: Cancel SIMULATION
+    
+    // MODIFIED: Attach listeners to the correct async cancellation functions.
+    obj_cancelLoadBtn.addEventListener('click', () => { _cancelDataLoading(); });
     obj_cancelSimBtn.addEventListener('click', () => { _cancelSimulation(); });
-
-    /**
-    * Initiates the simulation process when the "Simulate" button is clicked.
-    */
     obj_runSimBtn.addEventListener("click", () => { _startSimulation(); });
 
     /**
@@ -119,53 +135,139 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- CORE LOGIC FUNCTIONS ---
 
     /**
-    * NEW & CORRECTED: Fetches and displays data for a single, valid sample route.
-    * @param {string} str_capacity - The selected vehicle capacity in cm³.
+    * NEW: Starts the ASYNCHRONOUS data loading process.
     */
-    async function _loadDisplayData(str_capacity) {
-        _showLoader("Loading sample route data...", { showLoadCancel: true });
+    async function _startLoadingDisplayData(str_capacity) {
+        // Reset the cancellation flag at the start of a new job.
+        g_bln_load_cancellation_requested = false;
+        
+        obj_runSimBtn.disabled = true;
         _resetInitialUI();
-        g_bln_isLoadCancelled = false; // Reset the cancel flag
+        _showLoader("Starting data load...", { showLoadCancel: true, loadCancelDisabled: true });
 
         try {
-            const obj_response = await fetch('/get_vehicle_data', {
+            const response = await fetch('/start_data_loading', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ capacity: str_capacity }) // No page number needed
+                body: JSON.stringify({ capacity: str_capacity })
             });
-
-            if (!obj_response.ok) {
-                const err_data = await obj_response.json();
-                throw new Error(err_data.error || `Server error: ${obj_response.statusText}`);
+            const data = await response.json();
+            if (data.status === 'started') {
+                g_str_currentLoadId = data.load_id;
+                obj_cancelLoadBtn.disabled = false; // Enable cancel button now that we have an ID
+                g_obj_loadPollingInterval = setInterval(_checkLoadStatus, 2000);
+            } else {
+                throw new Error("Failed to start data loading on the server.");
             }
-
-            const obj_data = await obj_response.json();
-            
-            document.getElementById('initial-vehicle-volume').textContent = _formatNumber(obj_data.vehicle.capacity_cm3);
-            
-            if (obj_data.packages && obj_data.packages.length > 0) {
-                _appendPackagesToTable(obj_data.packages);
-                g_arr_allLoadedPackages = obj_data.packages; // Store the packages
-                
-                _updateInitialSummary(
-                    obj_data.vehicle.total_package_volume,
-                    obj_data.packages.length,
-                    obj_data.vehicle.total_service_time
-                );
-            }
-        } catch (obj_error) {
-            console.error("Failed to load display data:", obj_error);
-            alert(`Could not load sample route: ${obj_error.message}`);
-            _resetInitialUI();
-        } finally {
+        } catch (error) {
+            console.error("Error starting data load:", error);
+            alert(`Could not start data load: ${error.message}`);
             _hideLoader();
         }
     }
 
     /**
+     * NEW: Periodically checks the status of the running data load job.
+     */
+    async function _checkLoadStatus() {
+        // If a cancellation has already been sent from the UI, STOP POLLING.
+        // This prevents the "Loading..." message from reappearing.
+        if (g_bln_load_cancellation_requested) {
+            // We can even add logic here to forcefully stop the interval
+            // after a timeout if the backend doesn't respond.
+            // For now, simply stopping the UI updates is enough.
+            clearInterval(g_obj_loadPollingInterval);
+            return;
+        }
+
+        if (!g_str_currentLoadId) return;
+
+        _showLoader(`Loading sample route data...`, { showLoadCancel: true });
+        
+        try {
+            const response = await fetch(`/data_loading_status/${g_str_currentLoadId}`);
+            if (!response.ok) throw new Error(`Server status check failed: ${response.statusText}`);
+            
+            const data = await response.json();
+            
+            if (data.status === 'completed') {
+                clearInterval(g_obj_loadPollingInterval);
+                const result = data.result;
+                document.getElementById('initial-vehicle-volume').textContent = _formatNumber(result.vehicle.capacity_cm3);
+                if (result.packages && result.packages.length > 0) {
+                    _appendPackagesToTable(result.packages);
+                    g_arr_allLoadedPackages = result.packages;
+                    _updateInitialSummary(result.vehicle.total_package_volume, result.packages.length, result.vehicle.total_service_time);
+                }
+                // IMPROVEMENT: Only enable the simulate button on SUCCESS.
+                obj_runSimBtn.disabled = false;
+                _hideLoader();
+            } else if (data.status === 'error') {
+                clearInterval(g_obj_loadPollingInterval);
+                alert(`Data Loading Error: ${data.result.error}`);
+                _resetInitialUI();
+                _hideLoader();
+            } else if (data.status === 'cancelled') {
+                 clearInterval(g_obj_loadPollingInterval);
+                 alert("Data loading has been cancelled.");
+                 _resetInitialUI();
+                 // Keep the simulate button disabled
+                 obj_runSimBtn.disabled = true;
+                 _hideLoader();
+            }
+        } catch (error) {
+             console.error("Polling error:", error);
+             clearInterval(g_obj_loadPollingInterval);
+             alert("Lost connection with the server during data load.");
+             obj_runSimBtn.disabled = true; // Also disable on connection error
+             _hideLoader();
+        }
+    }
+
+    async function _cancelDataLoading() {
+        if (!g_str_currentLoadId) return;
+
+        // 1. SET THE FLAG FIRST. This is the most critical step.
+        g_bln_load_cancellation_requested = true;
+        
+        obj_cancelLoadBtn.disabled = true;
+
+        // 2. Give INSTANT UI feedback. This message will now "stick".
+        _showLoader('Cancellation signal sent. Process will terminate shortly...', { showLoadCancel: false });
+        
+        try {
+            // 3. Send the request. We don't even need to wait for it.
+            //    The backend will eventually catch up.
+            fetch(`/cancel_data_loading/${g_str_currentLoadId}`, { method: 'POST' });
+
+            // 4. Restart a slower, "cleanup" poller. This poller will wait for the final
+            //    "cancelled" state from the backend to hide the loader and show the alert.
+            //    This is more robust than letting the fast poller continue.
+            clearInterval(g_obj_loadPollingInterval); // Stop the old poller
+            const cleanupInterval = setInterval(async () => {
+                const response = await fetch(`/data_loading_status/${g_str_currentLoadId}`);
+                const data = await response.json();
+                if (data.status === 'cancelled' || data.status === 'error') {
+                    clearInterval(cleanupInterval);
+                    alert("Data loading has been cancelled.");
+                    _resetInitialUI();
+                    _hideLoader();
+                }
+            }, 2000); // Check every 2 seconds
+
+        } catch (error) {
+            console.error("Failed to send data load cancel request:", error);
+            _hideLoader();
+        }
+    }
+
+   /**
     * STARTS the simulation by calling the backend to create a background thread.
     */
     async function _startSimulation() {
+        // Reset the cancellation flag at the start of a new job.
+        g_bln_sim_cancellation_requested = false;
+
         if (!g_str_selectedCapacity) {
             alert("Please select a vehicle capacity first.");
             return;
@@ -195,7 +297,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 // FIX: NOW that we have an ID, ENABLE the cancel button.
                 obj_cancelSimBtn.disabled = false;
                 // Start polling every 2 seconds
-                g_obj_pollingInterval = setInterval(_checkSimulationStatus, 2000);
+                // #FIX: Use the correct variable name `g_obj_simPollingInterval`.
+                g_obj_simPollingInterval = setInterval(_checkSimulationStatus, 2000);
             } else {
                 throw new Error("Failed to start simulation on the server.");
             }
@@ -210,60 +313,82 @@ document.addEventListener("DOMContentLoaded", () => {
     * Periodically checks the status of the running simulation.
     */
     async function _checkSimulationStatus() {
+        // If a cancellation has already been sent, STOP POLLING.
+        // This prevents the "Running simulation..." message from reappearing.
+        if (g_bln_sim_cancellation_requested) {
+            clearInterval(g_obj_simPollingInterval);
+            return;
+        }
+
         if (!g_str_currentSimulationId) return;
         
-        _showLoader(`Running simulation... (ID: ${g_str_currentSimulationId})`, { showSimCancel: true });
+        _showLoader(`Running simulation... (ID: ${g_str_currentSimulationId.substring(0,8)})`, { showSimCancel: true });
 
         try {
+            obj_cancelSimBtn.style.display = 'none';
+
             const obj_response = await fetch(`/simulation_status/${g_str_currentSimulationId}`);
             if (!obj_response.ok) { // Handles cases where the server restarts mid-simulation
                 throw new Error(`Server status check failed: ${obj_response.statusText}`);
             }
             const obj_data = await obj_response.json();
+            
             if (obj_data.status === 'completed') {
-                clearInterval(g_obj_pollingInterval);
+                // #FIX: Use the correct variable name `g_obj_simPollingInterval`.
+                clearInterval(g_obj_simPollingInterval);
                 _updateResultsUI(obj_data.result);
                 _hideLoader();
                 g_str_currentSimulationId = null;
             } else if (obj_data.status === 'error') {
-                clearInterval(g_obj_pollingInterval);
+                // #FIX: Use the correct variable name `g_obj_simPollingInterval`.
+                clearInterval(g_obj_simPollingInterval);
                 alert(`Simulation Error: ${obj_data.result.error}`);
                 _hideLoader();
                 g_str_currentSimulationId = null;
-            } else if (obj_data.status === 'cancelled') {
-                 clearInterval(g_obj_pollingInterval);
-                 alert("Simulation has been cancelled.");
-                 _hideLoader();
-                 g_str_currentSimulationId = null;
             }
         } catch (error) {
              console.error("Polling error:", error);
-             clearInterval(g_obj_pollingInterval);
+             // #FIX: Use the correct variable name `g_obj_simPollingInterval`.
+             clearInterval(g_obj_simPollingInterval);
              alert("Lost connection with the server.");
              _hideLoader();
              g_str_currentSimulationId = null;
         }
     }
     
-    /**
-     * Sends a cancel request to the backend for the current simulation.
-     */
     async function _cancelSimulation() {
         if (!g_str_currentSimulationId) return;
 
-        console.log(`Sending cancel request for ${g_str_currentSimulationId}`);
-        // FIX: Disable the button immediately to prevent multiple clicks.
+        // 1. SET THE FLAG.
+        g_bln_sim_cancellation_requested = true;
+
         obj_cancelSimBtn.disabled = true;
-        _showLoader('Cancelling simulation...', { showSimCancel: false }); // Hide button after click
+
+        // 2. Give INSTANT UI feedback.
+        _showLoader('Cancellation signal sent. Simulation will terminate shortly...', { showSimCancel: false });
 
         try {
-            await fetch(`/cancel_simulation/${g_str_currentSimulationId}`, { method: 'POST' });
-        } catch (obj_error) {
-            console.error("Failed to send cancel request:", obj_error);
-            // The polling will eventually handle the UI cleanup even if this fails.
+            // 3. Send the request.
+            fetch(`/cancel_simulation/${g_str_currentSimulationId}`, { method: 'POST' });
+
+            // 4. Start the cleanup poller.
+            clearInterval(g_obj_simPollingInterval);
+            const cleanupInterval = setInterval(async () => {
+                 const response = await fetch(`/simulation_status/${g_str_currentSimulationId}`);
+                 const data = await response.json();
+                 if (data.status === 'cancelled' || data.status === 'error') {
+                     clearInterval(cleanupInterval);
+                     alert("Simulation has been cancelled.");
+                     _hideLoader();
+                 }
+            }, 1500); // Check every 1.5 seconds
+
+        } catch (error) {
+            console.error("Failed to send simulation cancel request:", error);
+            _hideLoader();
         }
     }
-
+    
     // --- UI HELPER FUNCTIONS ---
     // These functions manipulate the DOM to display data and feedback to the user.
 

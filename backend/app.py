@@ -39,7 +39,11 @@ obj_app = Flask(__name__, template_folder='../templates', static_folder='../stat
 g_dict_simulations = {}
 g_obj_lock = Lock()
 
-def _run_simulation_thread(str_simulationId, str_algorithmName, flt_capacityCm3, cancellation_flag):
+# NEW: Added a separate dictionary and lock for data loading jobs.
+g_dict_dataloads = {}
+g_obj_dataload_lock = Lock()
+
+def _run_simulation_thread(str_simulationId, str_algorithmName, flt_capacityCm3):
     """
     This function is the target for our background thread. It runs the heavy
     computation and updates the shared global state with the result.
@@ -74,42 +78,118 @@ def _run_simulation_thread(str_simulationId, str_algorithmName, flt_capacityCm3,
             g_dict_simulations[str_simulationId]['status'] = 'error'
             g_dict_simulations[str_simulationId]['result'] = {'error': str(e)}
 
+# NEW: Thread target for loading initial display data asynchronously.
+def _run_data_loading_thread(str_loadId, flt_capacityCm3):
+    """
+    Runs the data loading and processing in a background thread so the UI
+    doesn't freeze. It can now be cancelled.
+    """
+    global g_dict_dataloads
+    try:
+        cancellation_flag = g_dict_dataloads[str_loadId]['cancellation_flag']
+
+        # The data loader function now accepts a cancellation_flag.
+        dict_vehicleInfo, arr_packagesInfo = getDisplayDataForVehicle(flt_capacityCm3, cancellation_flag)
+
+        with g_obj_dataload_lock:
+            if g_dict_dataloads[str_loadId]['status'] == "cancelling":
+                g_dict_dataloads[str_loadId]['status'] = 'cancelled'
+            elif not dict_vehicleInfo:
+                 g_dict_dataloads[str_loadId]['status'] = 'error'
+                 g_dict_dataloads[str_loadId]['result'] = {'error': 'Could not find a valid sample route for the specified capacity.'}
+            else:
+                g_dict_dataloads[str_loadId]['status'] = 'completed'
+                g_dict_dataloads[str_loadId]['result'] = {
+                    'vehicle': dict_vehicleInfo,
+                    'packages': arr_packagesInfo
+                }
+    
+    except CancelledException:
+         with g_obj_dataload_lock:
+            g_dict_dataloads[str_loadId]['status'] = 'cancelled'
+            print(f"Data loading job {str_loadId} cancelled successfully.")
+    
+    except Exception as e:
+        print(f"Error in data loading thread {str_loadId}: {e}")
+        with g_obj_dataload_lock:
+            g_dict_dataloads[str_loadId]['status'] = 'error'
+            g_dict_dataloads[str_loadId]['result'] = {'error': str(e)}
+
 @obj_app.route('/')
 def index():
     """
-    Renders the main user interface.
-    This function populates the vehicle selection dropdown by fetching all
-    unique vehicle capacities from the dataset, preparing the user for
-    the 'Pre-Experimentation Stage' outlined in the methodology.
+    MODIFIED: This function is now instantaneous.
+    It no longer loads all vehicle capacities. It simply renders the
+    HTML template with an empty list. The actual capacities will be
+    fetched by JavaScript after the page loads.
     """
-    arr_capacities = getAllVehicleCapacities()
-    return render_template('index.html', capacities=arr_capacities)
+    # Pass an empty list to prevent the Jinja template from erroring out.
+    return render_template('index.html', capacities=[])
 
-@obj_app.route('/get_vehicle_data', methods=['POST'])
-def getVehicleData():
+
+@obj_app.route('/get_all_capacities', methods=['GET'])
+def get_all_capacities():
     """
-    MODIFIED: Handles AJAX requests to fetch package data for ONE sample route.
-    This data is ONLY for display on the left-hand panel of the UI. It provides
-    a concrete example of a real-world problem instance.
+    NEW ENDPOINT: This is dedicated to the slow task.
+    The frontend JavaScript will call this endpoint to populate the vehicle dropdown.
+    This isolates the slow operation from the initial page load.
     """
     try:
-        obj_data = request.get_json()
-        flt_capacityCm3 = float(obj_data.get('capacity'))
-
-        # MODIFICATION: Call the new display-specific function. Pagination is no longer needed.
-        dict_vehicleInfo, arr_packagesInfo = getDisplayDataForVehicle(flt_capacityCm3)
-
-        if not dict_vehicleInfo:
-            return jsonify({'error': 'Could not find a valid sample route for the specified capacity.'}), 404
-
-        # The structure of the returned JSON is simplified as pagination is removed.
-        return jsonify({
-            'vehicle': dict_vehicleInfo,
-            'packages': arr_packagesInfo
-        })
+        # The slow operation happens here, in its own request.
+        arr_capacities = getAllVehicleCapacities()
+        return jsonify({'capacities': arr_capacities})
     except Exception as e:
-        print(f"Error in /get_vehicle_data: {e}")
+        print(f"Error in /get_all_capacities: {e}")
         return jsonify({'error': str(e)}), 500
+
+# --- NEW ASYNC DATA LOADING ENDPOINTS ---
+@obj_app.route('/start_data_loading', methods=['POST'])
+def start_data_loading():
+    """ Starts the initial data loading in a background thread. """
+    global g_dict_dataloads
+    
+    obj_data = request.get_json()
+    flt_capacityCm3 = float(obj_data.get('capacity'))
+    str_loadId = str(uuid.uuid4())
+    
+    cancellation_flag = {'is_cancelled': False}
+    obj_thread = Thread(target=_run_data_loading_thread, args=(str_loadId, flt_capacityCm3))
+    
+    with g_obj_dataload_lock:
+        g_dict_dataloads[str_loadId] = {
+            'thread': obj_thread,
+            'status': 'running',
+            'result': None,
+            'cancellation_flag': cancellation_flag
+        }
+    
+    obj_thread.start()
+    return jsonify({'status': 'started', 'load_id': str_loadId})
+
+@obj_app.route('/data_loading_status/<string:str_loadId>')
+def data_loading_status(str_loadId):
+    """ Allows the client to poll for the status of a data loading job. """
+    with g_obj_dataload_lock:
+        dict_job = g_dict_dataloads.get(str_loadId)
+        if not dict_job:
+            return jsonify({'status': 'not_found'}), 404
+            
+        # FIX: Do not delete the record. Just return the final status.
+        # This prevents race conditions with cancel requests.
+        return jsonify({'status': dict_job['status'], 'result': dict_job['result']})
+
+@obj_app.route('/cancel_data_loading/<string:str_loadId>', methods=['POST'])
+def cancel_data_loading(str_loadId):
+    """ Sets the cancellation flag for a running data loading thread. """
+    with g_obj_dataload_lock:
+        dict_job = g_dict_dataloads.get(str_loadId)
+        if dict_job and dict_job['status'] == 'running':
+            print(f"Received cancel request for data loading job: {str_loadId}")
+            dict_job['cancellation_flag']['is_cancelled'] = True
+            dict_job['status'] = 'cancelling'
+            return jsonify({'status': 'cancellation_requested'})
+        else:
+            return jsonify({'status': 'not_found_or_already_complete'}), 404
 
 @obj_app.route('/start_simulation', methods=['POST'])
 def start_simulation():
@@ -129,7 +209,7 @@ def start_simulation():
     
     obj_thread = Thread(
         target=_run_simulation_thread,
-        args=(str_simulationId, str_algorithmName, flt_capacityCm3, cancellation_flag)
+        args=(str_simulationId, str_algorithmName, flt_capacityCm3) # REMOVED cancellation_flag from here
     )
 
     with g_obj_lock:
@@ -153,33 +233,35 @@ def simulation_status(str_simulationId):
     """
     with g_obj_lock:
         dict_sim = g_dict_simulations.get(str_simulationId)
-        if dict_sim:
-            if dict_sim['status'] in ['completed', 'error', 'cancelled']:
-                # Once the job is done, we can remove it from memory.
-                result_to_send = {'status': dict_sim['status'], 'result': dict_sim['result']}
-                del g_dict_simulations[str_simulationId]
-                return jsonify(result_to_send)
-            else:
-                # Still running
-                return jsonify({'status': dict_sim['status']})
-        else:
+        if not dict_sim:
             return jsonify({'status': 'not_found'}), 404
+        
+        # FIX: The primary fix for the 404 race condition.
+        # DO NOT delete the simulation entry from the dictionary upon completion.
+        # Just return its final state. The client will stop polling.
+        return jsonify({'status': dict_sim['status'], 'result': dict_sim['result']})
 
 
 @obj_app.route('/cancel_simulation/<string:str_simulationId>', methods=['POST'])
 def cancel_simulation(str_simulationId):
     """
-    NEW ENDPOINT: Sets the cancellation flag for a running simulation thread.
+    This endpoint now works reliably because the simulation status is not deleted.
+    It can correctly identify a running job and set its cancellation flag.
     """
     with g_obj_lock:
         dict_sim = g_dict_simulations.get(str_simulationId)
+        # Check if the job exists AND is currently in a runnable state.
         if dict_sim and dict_sim['status'] == 'running':
             print(f"Received cancel request for simulation ID: {str_simulationId}")
             dict_sim['cancellation_flag']['is_cancelled'] = True
             dict_sim['status'] = 'cancelling'
             return jsonify({'status': 'cancellation_requested'})
+        elif dict_sim:
+            # The job exists but is already completed, cancelled, or has errored.
+            return jsonify({'status': 'already_complete'}), 404
         else:
-            return jsonify({'status': 'not_found_or_already_complete'}), 404
+            # The job ID does not exist at all.
+            return jsonify({'status': 'not_found'}), 404
 
 if __name__ == '__main__':
     # Use single-threaded mode for predictable behavior and easier debugging.

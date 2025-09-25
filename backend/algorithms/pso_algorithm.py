@@ -56,11 +56,13 @@ def runPsoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution, cancella
                 raise CancelledException()
                 
             print(f"PSO Generation: {gen + 1}/{int_maxGenerations}")
-            # 1. Evaluate Fitness & Update Personal Best (pBest) for each particle.
-            for obj_particle in list_swarm:
+            # 1. Evaluate Fitness & Update pBest
+            # FASTER CANCELLATION: Check within the loop for more responsiveness.
+            for i, obj_particle in enumerate(list_swarm):
+                if cancellation_flag['is_cancelled']: raise CancelledException()
                 # The fitness is evaluated only if it hasn't been calculated before.
                 if not obj_particle.fitness.valid:
-                    obj_particle.fitness.values = obj_toolbox.evaluate(obj_particle)
+                    obj_particle.fitness.values = func_evaluateSolution(obj_particle) # This function also checks cancellation
 
                 # If the particle's current position is better than its personal best, update it.
                 if not obj_particle.pbest or obj_particle.pbest.fitness < obj_particle.fitness:
@@ -77,9 +79,12 @@ def runPsoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution, cancella
                 obj_toolbox.update(obj_particle, obj_gbest)
 
     except CancelledException:
-        # If the custom exception is caught, exit gracefully.
         print("PSO algorithm was cancelled.")
-        return obj_gbest, obj_gbest.fitness.values if obj_gbest else (0, float('inf'), float('inf'))
+        # FIX for NoneType: Return gbest if it exists, otherwise an empty list.
+        # This guarantees the return value is always iterable.
+        solution = obj_gbest if obj_gbest else []
+        fitness = obj_gbest.fitness.values if obj_gbest else (0, float('inf'), float('inf'))
+        return solution, fitness
 
     return obj_gbest, obj_gbest.fitness.values
 

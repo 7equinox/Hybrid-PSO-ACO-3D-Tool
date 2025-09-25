@@ -61,7 +61,10 @@ def runHybridPsoAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution,
             print(f"Hybrid PSO-ACO Generation: {gen + 1}/{int_maxGenerations}")
 
             # 1. Evaluate fitness and update pBest/gBest (Standard PSO Step)
-            for obj_particle in list_swarm:
+            # FASTER CANCELLATION: Add check
+            for i, obj_particle in enumerate(list_swarm):
+                if cancellation_flag['is_cancelled']: raise CancelledException()
+
                 if not obj_particle.fitness.valid:
                     obj_particle.fitness.values = obj_toolbox.evaluate(obj_particle)
 
@@ -91,13 +94,17 @@ def runHybridPsoAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution,
                         mtr_pheromoneMatrix[obj_eliteParticle[i]][obj_eliteParticle[i+1]] += flt_depositAmount
 
             # 4. Update Particle Velocity with Pheromone Influence
-            for obj_particle in list_swarm:
-                obj_toolbox.update(obj_particle, obj_gbest)
+            # FASTER CANCELLATION: Add check
+            for i, obj_particle in enumerate(list_swarm):
+                 if i % 5 == 0 and cancellation_flag['is_cancelled']: raise CancelledException()
+                 obj_toolbox.update(obj_particle, obj_gbest)
 
     except CancelledException:
-        # If the process is cancelled, log it and return the best result found so far.
         print("Hybrid PSO-ACO algorithm was cancelled.")
-        return obj_gbest, obj_gbest.fitness.values if obj_gbest else (0, float('inf'), float('inf'))
+        # FIX for NoneType: Ensure a valid iterable is always returned.
+        solution = obj_gbest if obj_gbest else []
+        fitness = obj_gbest.fitness.values if obj_gbest else (0, float('inf'), float('inf'))
+        return solution, fitness
 
     return obj_gbest, obj_gbest.fitness.values
 

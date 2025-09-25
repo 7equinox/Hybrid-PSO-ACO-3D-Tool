@@ -20,6 +20,8 @@ import os
 import pandas as pd
 import math
 import gc
+# Import the custom exception for cancellation.
+from backend.simulation.exceptions import CancelledException
 
 # --- Global Constants for File Paths and Cache Directory ---
 g_str_baseDir = os.path.dirname(os.path.abspath(__file__))
@@ -34,17 +36,25 @@ g_str_packageDataPath = os.path.join(g_str_baseDir, '../almrrc2021/almrrc2021-da
 g_str_dataCacheDir = os.path.join(g_str_baseDir, '..', 'data_cache')
 os.makedirs(g_str_dataCacheDir, exist_ok=True)
 
-def _loadAndReleaseJsonData():
+# A default cancellation flag for functions that might be called without one.
+DEFAULT_CANCEL_FLAG = {'is_cancelled': False}
+
+def _loadAndReleaseJsonData(cancellation_flag=DEFAULT_CANCEL_FLAG):
     """
-    A private utility function to load large JSON files into memory for
-    temporary processing. It ensures data is explicitly released to manage
-    memory usage effectively, which is critical for the 'Scalability Trials'.
+    MODIFIED: Now checks the cancellation flag BEFORE each large file read.
     """
-    print("Loading large JSON files into memory for processing...")
+    # PRE-EMPTIVE CHECK 1: Before touching the first file.
+    if cancellation_flag['is_cancelled']: raise CancelledException()
+    print("Loading large route JSON file into memory...")
     with open(g_str_routeDataPath, 'r') as f:
         df_routeData = pd.DataFrame.from_dict(json.load(f), orient='index')
+    
+    # PRE-EMPTIVE CHECK 2: Before touching the second file.
+    if cancellation_flag['is_cancelled']: raise CancelledException()
+    print("Loading large package JSON file into memory...")
     with open(g_str_packageDataPath, 'r') as f:
         dict_packageData = json.load(f)
+
     print("Finished loading large JSON files.")
     return df_routeData, dict_packageData
 
@@ -63,13 +73,16 @@ def getAllVehicleCapacities():
     print("Memory released after fetching capacities.")
     return sorted([float(c) for c in arr_capacities])
 
-def _getOrCreateCapacityCache(flt_vehicleCapacityCm3):
+def _getOrCreateCapacityCache(flt_vehicleCapacityCm3, cancellation_flag=DEFAULT_CANCEL_FLAG):
     """
     Manages the creation and retrieval of a 'smart' cache file.
     This avoids re-processing the entire large dataset for every request,
     significantly speeding up the 'Dataset Preparation' stage after the
     first run for a given vehicle capacity.
     """
+    # PRE-EMPTIVE CHECK 3: Before doing anything else (like clearing old cache).
+    if cancellation_flag['is_cancelled']: raise CancelledException()
+
     str_cacheFilename = f"{flt_vehicleCapacityCm3}.json"
     str_cacheFilepath = os.path.join(g_str_dataCacheDir, str_cacheFilename)
 
@@ -81,10 +94,14 @@ def _getOrCreateCapacityCache(flt_vehicleCapacityCm3):
 
     # If cache exists, load and return it (fast path).
     if os.path.exists(str_cacheFilepath):
+        # Even reading from cache should be cancellable
+        if cancellation_flag['is_cancelled']: raise CancelledException()
         print(f"Loading from existing smart cache file: {str_cacheFilename}")
         with open(str_cacheFilepath, 'r') as f:
             return json.load(f)
 
+    # The most important check: before calling the slow file-loading function.
+    if cancellation_flag['is_cancelled']: raise CancelledException()
     # If cache does not exist, create it (slow path, runs only once per capacity).
     print(f"Cache not found. Creating new smart cache for capacity: {flt_vehicleCapacityCm3}")
     df_routeDataCache, dict_packageDataCache = _loadAndReleaseJsonData()
@@ -101,7 +118,11 @@ def _getOrCreateCapacityCache(flt_vehicleCapacityCm3):
     # Step 1: Process and aggregate all packages for the given capacity.
     arr_allPackagesInfo = []
     arr_routeIds = df_matchingRoutes.index.tolist()
-    for str_routeId in arr_routeIds:
+    # MODIFIED: Check the flag inside the most expensive loop.
+    for i, str_routeId in enumerate(arr_routeIds):
+        # This check ensures long processing jobs can be interrupted.
+        if i % 50 == 0 and cancellation_flag['is_cancelled']:
+             raise CancelledException()
         dict_routePackages = dict_packageDataCache.get(str_routeId, {})
         for str_stopId, dict_packagesAtStop in dict_routePackages.items():
             for str_packageId, dict_details in dict_packagesAtStop.items():
@@ -149,7 +170,7 @@ def _getOrCreateCapacityCache(flt_vehicleCapacityCm3):
 
     return dict_dataToCache
 
-def getDisplayDataForVehicle(flt_vehicleCapacityCm3):
+def getDisplayDataForVehicle(flt_vehicleCapacityCm3, cancellation_flag=DEFAULT_CANCEL_FLAG):
     """
     NEW FUNCTION: Gets data for ONLY ONE valid sample route.
     This function finds the first route associated with the selected capacity
@@ -166,12 +187,13 @@ def getDisplayDataForVehicle(flt_vehicleCapacityCm3):
     arr_all_packages = dict_full_data.get('packages', [])
     set_processed_routes = set()
     
-    # Find the first RouteID whose total package volume is less than the vehicle capacity.
-    for obj_pkg in arr_all_packages:
+    # MODIFIED: Check the flag inside this loop too.
+    for i, obj_pkg in enumerate(arr_all_packages):
+        if i % 100 == 0 and cancellation_flag['is_cancelled']:
+            raise CancelledException()
+
         str_routeId = obj_pkg['route_id']
-        
-        if str_routeId in set_processed_routes:
-            continue
+        if str_routeId in set_processed_routes: continue
             
         # Get all packages for this specific route and calculate their total volume.
         arr_packages_for_this_route = [p for p in arr_all_packages if p['route_id'] == str_routeId]
@@ -201,29 +223,12 @@ def getDisplayDataForVehicle(flt_vehicleCapacityCm3):
     return None, []
 
 
-def getSimulationDataForVehicle(flt_vehicleCapacityCm3):
+def getSimulationDataForVehicle(flt_vehicleCapacityCm3,  cancellation_flag=DEFAULT_CANCEL_FLAG):
     """
-    MODIFIED FUNCTION: Gets the FULL aggregated dataset for simulation.
-    This function returns all packages from all routes matching the specified
-    capacity, to be used as the input for the optimization algorithms as per
-    the experimental methodology.
+    MODIFIED: Now accepts a cancellation_flag and passes it down.
     """
     print(f"Loading full aggregate dataset for capacity: {flt_vehicleCapacityCm3}")
-    dict_cachedData = _getOrCreateCapacityCache(flt_vehicleCapacityCm3)
+    dict_cachedData = _getOrCreateCapacityCache(flt_vehicleCapacityCm3, cancellation_flag)
     
-    if not dict_cachedData:
-        return None, []
-        
+    if not dict_cachedData: return None, []
     return dict_cachedData['metadata'], dict_cachedData['packages']
-
-def getVehicleInfoOnly(flt_vehicleCapacityCm3):
-    """
-    A utility to quickly fetch only the metadata for a vehicle,
-    leveraging the smart cache.
-    """
-    dict_cachedData = _getOrCreateCapacityCache(flt_vehicleCapacityCm3)
-    if not dict_cachedData:
-        return None
-
-    # Return only the 'metadata' portion of the cache.
-    return dict_cachedData['metadata']

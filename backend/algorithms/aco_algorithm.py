@@ -52,9 +52,12 @@ def runAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution, cancella
 
             arr_allAntSolutions = []
             # 1. Distribute Ants & Traverse Paths
-            for _ in range(int_numAnts):
-                # Each ant constructs a solution (item permutation) probabilistically.
-                arr_solution = _constructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, flt_alpha, flt_beta)
+            for i in range(int_numAnts):
+                # FASTER CANCELLATION: Check before each ant starts its journey.
+                if cancellation_flag['is_cancelled']: raise CancelledException()
+
+                # Pass the cancellation flag down to the solution constructor.
+                arr_solution = _constructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, flt_alpha, flt_beta, cancellation_flag)
                 if not arr_solution: continue
 
                 # Evaluate the fitness of the constructed solution.
@@ -91,7 +94,7 @@ def runAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution, cancella
 
     return arr_bestSolutionEver, tpl_bestFitnessEver
 
-def _constructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, flt_alpha, flt_beta):
+def _constructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, flt_alpha, flt_beta, cancellation_flag):
     """
     Builds a single ant's solution (a path). The decision for the next item
     is a probabilistic choice influenced by both the pheromone trail (global
@@ -106,6 +109,11 @@ def _constructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, flt_alph
     list_availableItems.remove(int_currentItem)
 
     while list_availableItems:
+        # --- CRITICAL FIX FOR FASTER CANCELLATION ---
+        # This check is in the tightest loop and makes cancellation almost instantaneous.
+        if cancellation_flag['is_cancelled']:
+            raise CancelledException()
+
         arr_probabilities = []
         # Calculate the probability of moving to each of the remaining items.
         for int_nextItem in list_availableItems:

@@ -84,11 +84,10 @@ document.addEventListener("DOMContentLoaded", () => {
     obj_capacitySelect.addEventListener("change", (obj_event) => {
         g_str_selectedCapacity = obj_event.target.value;
         if (g_str_selectedCapacity) {
-            g_bln_isLoadCancelled = false; // Reset cancellation flag on new selection.
-            _startIncrementalLoad(g_str_selectedCapacity);
+            // It now calls the correct function for loading display data.
+            _loadDisplayData(g_str_selectedCapacity);
         }
     });
-
     /**
     * Sets the cancellation flag when the "Cancel" button in the loader is clicked.
     */
@@ -114,77 +113,51 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- CORE LOGIC FUNCTIONS ---
 
     /**
-    * Manages the entire incremental data loading process. It fetches package data
-    * from the backend page by page until all data is loaded or the user cancels.
-    * This corresponds to the 'Dataset Preparation' stage of the methodology.
+    * NEW & CORRECTED: Fetches and displays data for a single, valid sample route.
     * @param {string} str_capacity - The selected vehicle capacity in cm³.
     */
-    async function _startIncrementalLoad(str_capacity) {
-        _showLoader("Preparing data load...");
+    async function _loadDisplayData(str_capacity) {
+        _showLoader("Loading sample route data...");
         _resetInitialUI();
+        g_bln_isLoadCancelled = false; // Reset the cancel flag
 
-        let int_currentPage = 1;
-        let int_totalPages = 1;
-        let flt_runningVolume = 0;
-        let flt_runningServiceTime = 0;
+        try {
+            const obj_response = await fetch('/get_vehicle_data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ capacity: str_capacity }) // No page number needed
+            });
 
-        // Loop until all pages are fetched OR the cancellation flag is set.
-        while (int_currentPage <= int_totalPages && !g_bln_isLoadCancelled) {
-            try {
-                const obj_response = await fetch('/get_vehicle_data', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ capacity: str_capacity, page: int_currentPage })
-                });
-
-                if (!obj_response.ok) {
-                    throw new Error(`Server error: ${obj_response.statusText}`);
-                }
-
-                const obj_data = await obj_response.json();
-
-                if (int_currentPage === 1 && obj_data.vehicle.pagination_meta) {
-                    int_totalPages = obj_data.vehicle.pagination_meta.total_pages;
-                    document.getElementById('initial-vehicle-volume').textContent = _formatNumber(obj_data.vehicle.capacity_cm3);
-                }
-
-                if (obj_data.packages && obj_data.packages.length > 0) {
-                    _appendPackagesToTable(obj_data.packages);
-                    g_arr_allLoadedPackages.push(...obj_data.packages);
-
-                    obj_data.packages.forEach(obj_pkg => {
-                        flt_runningVolume += obj_pkg.volume;
-                        flt_runningServiceTime += obj_pkg.service_time;
-                    });
-
-                    _updateInitialSummary(flt_runningVolume, g_arr_allLoadedPackages.length, flt_runningServiceTime);
-                }
-
-                const int_totalItems = obj_data.vehicle.pagination_meta.total_items;
-                _showLoader(`Loading packages... ${g_arr_allLoadedPackages.length} of ${int_totalItems}`);
-
-                int_currentPage++;
-
-            } catch (obj_error) {
-                console.error("Failed during incremental load:", obj_error);
-                alert("An error occurred while loading data. Please try again.");
-                break; // Exit the loop on error.
+            if (!obj_response.ok) {
+                const err_data = await obj_response.json();
+                throw new Error(err_data.error || `Server error: ${obj_response.statusText}`);
             }
-        } // End of while loop
 
-        if (g_bln_isLoadCancelled) {
-            console.log(`Loading cancelled by user. Loaded ${g_arr_allLoadedPackages.length} packages.`);
-        } else {
-            console.log("Finished loading all packages.");
+            const obj_data = await obj_response.json();
+            
+            document.getElementById('initial-vehicle-volume').textContent = _formatNumber(obj_data.vehicle.capacity_cm3);
+            
+            if (obj_data.packages && obj_data.packages.length > 0) {
+                _appendPackagesToTable(obj_data.packages);
+                g_arr_allLoadedPackages = obj_data.packages; // Store the packages
+                
+                _updateInitialSummary(
+                    obj_data.vehicle.total_package_volume,
+                    obj_data.packages.length,
+                    obj_data.vehicle.total_service_time
+                );
+            }
+        } catch (obj_error) {
+            console.error("Failed to load display data:", obj_error);
+            alert(`Could not load sample route: ${obj_error.message}`);
+            _resetInitialUI();
+        } finally {
+            _hideLoader();
         }
-
-        _hideLoader();
     }
 
     /**
-    * Triggers the backend simulation. It gathers all required data (algorithm,
-    * capacity, packages), sends it to the server, and awaits the results.
-    * This function executes the 'Experimentation Stage' of the methodology.
+    * MODIFIED: Triggers the backend simulation and no longer sends package data.
     */
     async function _runSimulation() {
         if (!g_str_selectedCapacity) {
@@ -192,22 +165,21 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
         if (g_arr_allLoadedPackages.length === 0) {
-            alert("Please select a vehicle and wait for data to load.");
+            alert("Please select a vehicle and wait for the sample data to load.");
             return;
         }
 
         obj_modal.style.display = "none";
         _showLoader("Running simulation... This may take a moment.");
-        obj_cancelLoadBtn.style.display = 'none'; // Hide cancel during simulation
+        obj_cancelLoadBtn.style.display = 'none';
 
         try {
             const obj_response = await fetch('/simulate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+                body: JSON.stringify({ // Payload is now simplified
                     algorithm: g_str_selectedAlgorithm,
-                    capacity: g_str_selectedCapacity,
-                    packages: g_arr_allLoadedPackages
+                    capacity: g_str_selectedCapacity
                 }),
             });
             const obj_results = await obj_response.json();
@@ -222,7 +194,7 @@ document.addEventListener("DOMContentLoaded", () => {
             alert("A critical error occurred during the simulation.");
         } finally {
             _hideLoader();
-            obj_cancelLoadBtn.style.display = 'block'; // Re-show cancel button
+            obj_cancelLoadBtn.style.display = 'block';
         }
     }
 

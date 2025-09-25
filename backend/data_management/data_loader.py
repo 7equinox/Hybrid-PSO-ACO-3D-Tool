@@ -23,12 +23,12 @@ import gc
 
 # --- Global Constants for File Paths and Cache Directory ---
 g_str_baseDir = os.path.dirname(os.path.abspath(__file__))
-g_str_routeDataPath = os.path.join(g_str_baseDir, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_route_data.json')
-g_str_packageDataPath = os.path.join(g_str_baseDir, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_package_data.json')
+# g_str_routeDataPath = os.path.join(g_str_baseDir, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_route_data.json')
+# g_str_packageDataPath = os.path.join(g_str_baseDir, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_package_data.json')
 
 # Use smaller sample data for development and demonstration.
-# g_str_routeDataPath = os.path.join(g_str_baseDir, '../sample_data/test_route_data.json')
-# g_str_packageDataPath = os.path.join(g_str_baseDir, '../sample_data/test_package_data.json')
+g_str_routeDataPath = os.path.join(g_str_baseDir, '../sample_data/test_route_data.json')
+g_str_packageDataPath = os.path.join(g_str_baseDir, '../sample_data/test_package_data.json')
 
 # Cache directory to store pre-processed data, improving performance on subsequent runs.
 g_str_dataCacheDir = os.path.join(g_str_baseDir, '..', 'data_cache')
@@ -149,38 +149,72 @@ def _getOrCreateCapacityCache(flt_vehicleCapacityCm3):
 
     return dict_dataToCache
 
-def loadDataForVehicle(flt_vehicleCapacityCm3, int_page=1, int_pageSize=100):
+def getDisplayDataForVehicle(flt_vehicleCapacityCm3):
     """
-    The main public function to load paginated data for a given vehicle capacity.
-    It relies on the caching mechanism to ensure fast and memory-efficient data retrieval.
+    NEW FUNCTION: Gets data for ONLY ONE valid sample route.
+    This function finds the first route associated with the selected capacity
+    where the total volume of packages does not exceed the vehicle's capacity.
+    This provides a realistic, single-route example for display on the UI's left panel.
     """
-    dict_cachedData = _getOrCreateCapacityCache(flt_vehicleCapacityCm3)
+    print(f"Searching for a single valid display route for capacity: {flt_vehicleCapacityCm3}")
+    
+    # We still use the main cache to avoid re-reading the massive source files.
+    dict_full_data = _getOrCreateCapacityCache(flt_vehicleCapacityCm3)
+    if not dict_full_data:
+        return None, []
+        
+    arr_all_packages = dict_full_data.get('packages', [])
+    set_processed_routes = set()
+    
+    # Find the first RouteID whose total package volume is less than the vehicle capacity.
+    for obj_pkg in arr_all_packages:
+        str_routeId = obj_pkg['route_id']
+        
+        if str_routeId in set_processed_routes:
+            continue
+            
+        # Get all packages for this specific route and calculate their total volume.
+        arr_packages_for_this_route = [p for p in arr_all_packages if p['route_id'] == str_routeId]
+        flt_total_volume = sum(p['volume'] for p in arr_packages_for_this_route)
+        
+        # This check ensures the example shown is a valid, loadable scenario.
+        if flt_total_volume < flt_vehicleCapacityCm3:
+            print(f"Found valid display route: {str_routeId}")
+            
+            # Construct vehicle info specifically for this single route.
+            flt_dimension = (flt_vehicleCapacityCm3 ** (1./3.))
+            dict_vehicleInfo = {
+                'id': str_routeId, # Display only this route's ID
+                'capacity_cm3': flt_vehicleCapacityCm3,
+                'width': math.floor(flt_dimension),
+                'height': math.floor(flt_dimension),
+                'depth': math.floor(flt_dimension),
+                'total_package_volume': flt_total_volume,
+                'total_service_time': sum(p['service_time'] for p in arr_packages_for_this_route),
+                'num_packages': len(arr_packages_for_this_route),
+            }
+            return dict_vehicleInfo, arr_packages_for_this_route
 
+        set_processed_routes.add(str_routeId)
+
+    # If no single route fits, which is unlikely but possible, return nothing.
+    return None, []
+
+
+def getSimulationDataForVehicle(flt_vehicleCapacityCm3):
+    """
+    MODIFIED FUNCTION: Gets the FULL aggregated dataset for simulation.
+    This function returns all packages from all routes matching the specified
+    capacity, to be used as the input for the optimization algorithms as per
+    the experimental methodology.
+    """
+    print(f"Loading full aggregate dataset for capacity: {flt_vehicleCapacityCm3}")
+    dict_cachedData = _getOrCreateCapacityCache(flt_vehicleCapacityCm3)
+    
     if not dict_cachedData:
         return None, []
-
-    dict_metadata = dict_cachedData['metadata']
-    arr_allPackagesInfo = dict_cachedData['packages']
-
-    # Paginate the results from the full cached list.
-    int_totalPackages = dict_metadata['num_packages']
-    int_totalPages = math.ceil(int_totalPackages / int_pageSize) if int_pageSize > 0 else 1
-    int_startIndex = (int_page - 1) * int_pageSize
-    int_endIndex = int_startIndex + int_pageSize
-    arr_paginatedPackages = arr_allPackagesInfo[int_startIndex:int_endIndex]
-
-    # Construct the final vehicle info dictionary, adding pagination details.
-    dict_aggregateVehicleInfo = {
-        **dict_metadata,
-        'pagination_meta': {
-            'current_page': int_page,
-            'page_size': int_pageSize,
-            'total_pages': int_totalPages,
-            'total_items': int_totalPackages
-        }
-    }
-
-    return dict_aggregateVehicleInfo, arr_paginatedPackages
+        
+    return dict_cachedData['metadata'], dict_cachedData['packages']
 
 def getVehicleInfoOnly(flt_vehicleCapacityCm3):
     """

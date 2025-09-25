@@ -24,7 +24,7 @@ if g_str_projectRoot not in sys.path:
     sys.path.insert(0, g_str_projectRoot)
 
 # Import the refactored modules.
-from backend.data_management.data_loader import getAllVehicleCapacities, loadDataForVehicle
+from backend.data_management.data_loader import getAllVehicleCapacities, getDisplayDataForVehicle
 from backend.simulation.problem_solver import solveLoadingProblem
 
 # Initialize the Flask application
@@ -44,26 +44,21 @@ def index():
 @obj_app.route('/get_vehicle_data', methods=['POST'])
 def getVehicleData():
     """
-    Handles AJAX requests to fetch package data for a selected vehicle capacity.
-    This corresponds to the 'Dataset Preparation' step, where the system
-    loads and prepares a specific problem instance for simulation.
+    MODIFIED: Handles AJAX requests to fetch package data for ONE sample route.
+    This data is ONLY for display on the left-hand panel of the UI. It provides
+    a concrete example of a real-world problem instance.
     """
     try:
         obj_data = request.get_json()
         flt_capacityCm3 = float(obj_data.get('capacity'))
-        int_page = obj_data.get('page', 1)
-        int_pageSize = 100 # A small page size allows for incremental loading display.
 
-        # The data loader handles memory management efficiently via caching.
-        dict_vehicleInfo, arr_packagesInfo = loadDataForVehicle(
-            flt_capacityCm3,
-            int_page=int_page,
-            int_pageSize=int_pageSize
-        )
+        # MODIFICATION: Call the new display-specific function. Pagination is no longer needed.
+        dict_vehicleInfo, arr_packagesInfo = getDisplayDataForVehicle(flt_capacityCm3)
 
         if not dict_vehicleInfo:
-            return jsonify({'error': 'Vehicle with specified capacity not found.'}), 404
+            return jsonify({'error': 'Could not find a valid sample route for the specified capacity.'}), 404
 
+        # The structure of the returned JSON is simplified as pagination is removed.
         return jsonify({
             'vehicle': dict_vehicleInfo,
             'packages': arr_packagesInfo
@@ -75,27 +70,22 @@ def getVehicleData():
 @obj_app.route('/simulate', methods=['POST'])
 def simulate():
     """
-    Initiates the core 'Experimentation Stage' by running the selected algorithm.
-    It receives the problem definition (algorithm, capacity, packages) from the
-    user, calls the main solver function, and returns the computed metrics
-    and packing solution.
+    MODIFIED: Initiates the core 'Experimentation Stage' by running the algorithm.
+    It now only receives the capacity and algorithm name, and the solver fetches
+    the full aggregated dataset itself.
     """
     try:
         obj_data = request.get_json()
         str_algorithmName = obj_data.get('algorithm')
         flt_capacityCm3 = float(obj_data.get('capacity'))
-        arr_allPackages = obj_data.get('packages')
+        
+        # MODIFICATION: The 'packages' array is no longer passed from the frontend.
+        print(f"Starting simulation for {str_algorithmName} with capacity {flt_capacityCm3}...")
 
-        if not arr_allPackages:
-            return jsonify({'error': 'Package data is required for simulation.'}), 400
-
-        print(f"Starting simulation for {str_algorithmName} with {len(arr_allPackages)} packages...")
-
-        # Delegate the entire simulation logic to the problem solver.
+        # The solver now fetches the full aggregated data internally.
         dict_results = solveLoadingProblem(
             str_algorithmName,
-            flt_capacityCm3,
-            arr_allPackages
+            flt_capacityCm3
         )
 
         print("Simulation finished. Sending results to frontend.")

@@ -21,19 +21,19 @@ from memory_profiler import memory_usage
 from py3dbp import Packer, Bin, Item
 
 # Import dependent modules
-from backend.data_management.data_loader import getVehicleInfoOnly
+from backend.data_management.data_loader import getSimulationDataForVehicle
 from backend.simulation.metrics_calculator import calculateAllMetrics
 from backend.algorithms.pso_algorithm import runPsoAlgorithm
 from backend.algorithms.aco_algorithm import runAcoAlgorithm
 from backend.algorithms.hybrid_pso_aco_algorithm import runHybridPsoAcoAlgorithm
 
-def solveLoadingProblem(str_algorithmName, flt_capacityCm3, arr_packagesInfo):
+def solveLoadingProblem(str_algorithmName, flt_capacityCm3):
     """
-    The main orchestrator function for a single simulation run. It sets up the
-    3D bin packing problem, invokes the correct algorithm, and structures
-    the final results.
+    The main orchestrator function for a single simulation run. It fetches the
+    full simulation dataset, sets up the 3D bin packing problem, invokes the
+    correct algorithm, and structures the final results.
     """
-    dict_vehicleInfo = getVehicleInfoOnly(flt_capacityCm3)
+    dict_vehicleInfo, arr_packagesInfo = getSimulationDataForVehicle(flt_capacityCm3)
 
     if (not dict_vehicleInfo or not arr_packagesInfo):
         return {'error': 'Could not get vehicle info or package data was missing.'}

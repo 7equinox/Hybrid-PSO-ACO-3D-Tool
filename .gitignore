@@ -2,4 +2,4 @@ backend/almrrc2021/
 backend/algorithms/__pycache__/
 backend/data_management/__pycache__/
 backend/simulation/__pycache__/
-# backend/data_cache/*.json
+backend/data_cache/*.json

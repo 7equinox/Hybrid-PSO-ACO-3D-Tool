@@ -99,10 +99,18 @@ def _updateParticleHybrid(obj_particle, obj_gbest, pheromone_matrix, service_tim
     # --- Cognitive & Social Components (from PSO) ---
     # Standard influence from personal and global best positions.
     arr_pbestSwaps = []
-    # ... (code for cognitive swaps is identical to standalone PSO)
+    arr_pbestDiff = [i for i in range(int_numItems) if i < len(obj_particle.pbest) and obj_particle[i] != obj_particle.pbest[i]]
+    if len(arr_pbestDiff) >= 2:
+        int_numSwaps = int(phi1 * random.random() * len(arr_pbestDiff) / 2)
+        for _ in range(int_numSwaps):
+            arr_pbestSwaps.append(tuple(random.sample(arr_pbestDiff, 2)))
     
     arr_gbestSwaps = []
-    # ... (code for social swaps is identical to standalone PSO)
+    arr_gbestDiff = [i for i in range(int_numItems) if i < len(obj_gbest) and obj_particle[i] != obj_gbest[i]]
+    if len(arr_gbestDiff) >= 2:
+        int_numSwaps = int(phi2 * random.random() * len(arr_gbestDiff) / 2)
+        for _ in range(int_numSwaps):
+            arr_gbestSwaps.append(tuple(random.sample(arr_gbestDiff, 2)))
     
     # --- PHEROMONE-GUIDED COMPONENT (from ACO) ---
     # This is the key hybridization. It introduces swaps that move items into
@@ -130,7 +138,17 @@ def _updateParticleHybrid(obj_particle, obj_gbest, pheromone_matrix, service_tim
 
     # --- HEURISTIC COMPONENT (Domain Knowledge) ---
     arr_heuristicSwaps = []
-    # ... (code for heuristic swaps is identical to standalone PSO)
+    int_numHeuristicSwaps = int(phi3 * random.random())
+    for _ in range(int_numHeuristicSwaps):
+        if int_numItems < 2: continue
+        idx1, idx2 = random.sample(range(int_numItems), 2)
+        if idx1 > idx2: idx1, idx2 = idx2, idx1 # Ensure consistent order for swap tuple
+
+        int_item1Index = obj_particle[idx1]
+        int_item2Index = obj_particle[idx2]
+
+        if service_times[int_item1Index] > service_times[int_item2Index]:
+            arr_heuristicSwaps.append((idx1, idx2))
             
     # Apply all swaps from all components to generate the final particle movement.
     arr_allSwaps = list(set(arr_pbestSwaps + arr_gbestSwaps + arr_pheromoneSwaps + arr_heuristicSwaps))

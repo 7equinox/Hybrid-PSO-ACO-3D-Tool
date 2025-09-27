@@ -86,7 +86,8 @@ The software's architecture is a direct and faithful implementation of the desig
 Once the setup is complete, start the Flask web server from the project's root directory:
 
 ```bash
-python backend/main_app.py```
+python backend/main_app.py
+```
 
 Open a web browser and navigate to `http://127.0.0.1:5000` to access the tool.
 

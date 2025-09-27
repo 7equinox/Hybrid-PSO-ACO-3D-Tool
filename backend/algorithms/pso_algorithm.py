@@ -51,15 +51,10 @@ def runPsoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution, cancella
     # This loop represents the core cycle of the PSO algorithm.
     try:
         for gen in range(int_maxGenerations):
-            # NEW: Check for cancellation at the start of each generation.
-            if cancellation_flag['is_cancelled']:
-                raise CancelledException()
                 
             print(f"PSO Generation: {gen + 1}/{int_maxGenerations}")
             # 1. Evaluate Fitness & Update pBest
-            # FASTER CANCELLATION: Check within the loop for more responsiveness.
-            for i, obj_particle in enumerate(list_swarm):
-                if cancellation_flag['is_cancelled']: raise CancelledException()
+            for obj_particle in list_swarm:
                 # The fitness is evaluated only if it hasn't been calculated before.
                 if not obj_particle.fitness.valid:
                     obj_particle.fitness.values = func_evaluateSolution(obj_particle) # This function also checks cancellation

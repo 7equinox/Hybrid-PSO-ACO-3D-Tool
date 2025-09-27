@@ -54,16 +54,12 @@ def runHybridPsoAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution,
     # --- HYBRID OPTIMIZATION LOOP ---
     try:
         for gen in range(int_maxGenerations):
-            # NEW: Check for a cancellation request at the start of each generation.
-            if cancellation_flag['is_cancelled']:
-                raise CancelledException()
 
             print(f"Hybrid PSO-ACO Generation: {gen + 1}/{int_maxGenerations}")
 
             # 1. Evaluate fitness and update pBest/gBest (Standard PSO Step)
             # FASTER CANCELLATION: Add check
             for i, obj_particle in enumerate(list_swarm):
-                if cancellation_flag['is_cancelled']: raise CancelledException()
 
                 if not obj_particle.fitness.valid:
                     obj_particle.fitness.values = obj_toolbox.evaluate(obj_particle)
@@ -95,8 +91,7 @@ def runHybridPsoAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution,
 
             # 4. Update Particle Velocity with Pheromone Influence
             # FASTER CANCELLATION: Add check
-            for i, obj_particle in enumerate(list_swarm):
-                 if i % 5 == 0 and cancellation_flag['is_cancelled']: raise CancelledException()
+            for obj_particle in list_swarm:
                  obj_toolbox.update(obj_particle, obj_gbest)
 
     except CancelledException:

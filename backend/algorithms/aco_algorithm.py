@@ -43,18 +43,14 @@ def runAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution, cancella
     # --- ITERATIVE OPTIMIZATION LOOP ---
     # Represents the core cycle of the ACO algorithm.
     try:
+        # NEW: Check for a cancellation request at the start of each generation.
         for gen in range(int_maxGenerations):
-            # NEW: Check for a cancellation request at the start of each generation.
-            if cancellation_flag['is_cancelled']:
-                raise CancelledException()
 
             print(f"ACO Generation: {gen + 1}/{int_maxGenerations}")
 
             arr_allAntSolutions = []
             # 1. Distribute Ants & Traverse Paths
             for i in range(int_numAnts):
-                # FASTER CANCELLATION: Check before each ant starts its journey.
-                if cancellation_flag['is_cancelled']: raise CancelledException()
 
                 # Pass the cancellation flag down to the solution constructor.
                 arr_solution = _constructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, flt_alpha, flt_beta, cancellation_flag)
@@ -109,11 +105,6 @@ def _constructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, flt_alph
     list_availableItems.remove(int_currentItem)
 
     while list_availableItems:
-        # --- CRITICAL FIX FOR FASTER CANCELLATION ---
-        # This check is in the tightest loop and makes cancellation almost instantaneous.
-        if cancellation_flag['is_cancelled']:
-            raise CancelledException()
-
         arr_probabilities = []
         # Calculate the probability of moving to each of the remaining items.
         for int_nextItem in list_availableItems:

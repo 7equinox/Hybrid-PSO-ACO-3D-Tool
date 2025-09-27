@@ -17,6 +17,7 @@ ESTONILO, JULIUS EVAN C.
 """
 import time
 import random
+import numpy as np # <-- IMPORT NUMPY
 from memory_profiler import memory_usage
 from py3dbp import Packer, Bin, Item
 
@@ -39,26 +40,93 @@ def solveLoadingProblem(str_algorithmName, flt_capacityCm3, cancellation_flag):
     which it will check periodically and pass down to the algorithm.
     """
     # --- IMMEDIATE PRE-EMPTIVE CHECK ---
-    # This is the key fix for the "Starting simulation..." delay.
-    # It checks for cancellation *before* attempting to load any data for the simulation.
     if cancellation_flag['is_cancelled']:
         raise CancelledException()
 
     print("Simulation started: Now loading required dataset...")
 
-    # MODIFIED: Pass the cancellation_flag to getSimulationDataForVehicle.
-    # This ensures that the data preparation step of the simulation is also cancellable.
     dict_vehicleInfo, arr_packagesInfo = getSimulationDataForVehicle(flt_capacityCm3, cancellation_flag)
 
     if (not dict_vehicleInfo or not arr_packagesInfo):
-        # Handle case where data loading itself was cancelled.
         if cancellation_flag['is_cancelled']: raise CancelledException()
         return {'error': 'Could not get vehicle info or package data was missing.'}
 
+    # ==============================================================================
+    # === NEW: VOLUME-CONSTRAINED STRATIFIED SAMPLING ==============================
+    # To prevent memory errors on large datasets (e.g., >70k items) and to
+    # significantly speed up computation, we sample the data down to a manageable size.
+    # This directly implements the "Sampling Method" from Chapter 3.
+    # ==============================================================================
+    MAX_SAMPLE_SIZE = 1000 # Set a hard limit to prevent memory issues.
+    if len(arr_packagesInfo) > MAX_SAMPLE_SIZE:
+        print(f"Original dataset has {len(arr_packagesInfo)} items. Applying sampling to reduce to {MAX_SAMPLE_SIZE}.")
+
+        # 1. Stratification based on volume
+        volumes = [p['volume'] for p in arr_packagesInfo]
+        p33, p66 = np.percentile(volumes, [33.3, 66.7])
+        
+        small_items = [p for p in arr_packagesInfo if p['volume'] <= p33]
+        medium_items = [p for p in arr_packagesInfo if p33 < p['volume'] <= p66]
+        large_items = [p for p in arr_packagesInfo if p['volume'] > p66]
+
+        random.shuffle(small_items)
+        random.shuffle(medium_items)
+        random.shuffle(large_items)
+
+        # 2. Proportional Allocation & 3. Constrained Random Selection
+        sampled_packages = []
+        current_volume = 0.0
+        
+        # Interleave selections to maintain proportions
+        iter_small = iter(small_items)
+        iter_medium = iter(medium_items)
+        iter_large = iter(large_items)
+        
+        while len(sampled_packages) < MAX_SAMPLE_SIZE:
+            added_in_cycle = False
+            
+            # Try to add a small item
+            try:
+                item = next(iter_small)
+                if current_volume + item['volume'] <= flt_capacityCm3:
+                    sampled_packages.append(item)
+                    current_volume += item['volume']
+                    added_in_cycle = True
+            except StopIteration: pass
+            if len(sampled_packages) >= MAX_SAMPLE_SIZE: break
+
+            # Try to add a medium item
+            try:
+                item = next(iter_medium)
+                if current_volume + item['volume'] <= flt_capacityCm3:
+                    sampled_packages.append(item)
+                    current_volume += item['volume']
+                    added_in_cycle = True
+            except StopIteration: pass
+            if len(sampled_packages) >= MAX_SAMPLE_SIZE: break
+
+            # Try to add a large item
+            try:
+                item = next(iter_large)
+                if current_volume + item['volume'] <= flt_capacityCm3:
+                    sampled_packages.append(item)
+                    current_volume += item['volume']
+                    added_in_cycle = True
+            except StopIteration: pass
+            
+            # If we've exhausted all item lists or can't fit any more, stop.
+            if not added_in_cycle:
+                break
+        
+        # Replace the original package list with our new, smaller, feasible sample
+        arr_packagesInfo = sampled_packages
+        print(f"Sampling complete. New problem size: {len(arr_packagesInfo)} items.")
+    # ==============================================================================
+    # === END OF SAMPLING IMPLEMENTATION ===========================================
+    # ==============================================================================
+
+
     # --- DYNAMIC CONSTRAINT IMPLEMENTATION ---
-    # As per the methodology, this section simulates last-minute changes by
-    # randomly removing 10-20% of items before optimization. This tests the
-    # algorithm's adaptability.
     if (len(arr_packagesInfo) > 1):
         int_numToRemove = int(len(arr_packagesInfo) * random.uniform(0.1, 0.2))
         arr_packagesToLoad = random.sample(arr_packagesInfo, len(arr_packagesInfo) - int_numToRemove)
@@ -80,43 +148,32 @@ def solveLoadingProblem(str_algorithmName, flt_capacityCm3, cancellation_flag):
     )
 
     # --- FITNESS FUNCTION ---
-    # This is the core evaluation function passed to each algorithm. It takes a
-    # potential solution (an ordering of items), simulates packing, and returns
-    # the multi-objective fitness values (volume, relocations, sequence length).
     def evaluateSolution(arr_itemOrderIndices):
-        # NEW: Check the cancellation flag at the start of each evaluation.
-        # Since this function is called many times, this is an effective
-        # way to catch a cancel request quickly.
         if cancellation_flag['is_cancelled']:
             raise CancelledException()
 
         obj_packer = Packer()
-        # Create a fresh bin for each evaluation to ensure independent trials.
         obj_freshBin = Bin(obj_bin.name, obj_bin.width, obj_bin.height, obj_bin.depth, obj_bin.max_weight)
         obj_packer.add_bin(obj_freshBin)
 
         for int_i in arr_itemOrderIndices:
             obj_packer.add_item(arr_itemsToPack[int_i])
         
-        obj_packer.pack(bigger_first=False) # Use the library's packing heuristic.
+        obj_packer.pack(bigger_first=False) 
         
         arr_packedItems = obj_packer.bins[0].items
         if not arr_packedItems:
-            # Return a very poor fitness for solutions that pack nothing.
             return 0, float('inf'), float('inf')
         
-        # Get the original package data for only the items that were successfully packed.
         set_packedItemIds = {item.name for item in arr_packedItems}
         arr_finalPackagesInfo = [p for p in arr_packagesToLoad if p['id'] in set_packedItemIds]
 
-        # Calculate all metrics as defined in the methodology.
         dict_metrics = calculateAllMetrics(
             arr_packedItems,
             obj_bin.get_volume(),
             arr_finalPackagesInfo
         )
         
-        # Penalize infeasible solutions heavily in the fitness score.
         if dict_metrics['unloading_feasibility'] == 'Infeasible':
              return 0, float('inf'), float('inf')
 
@@ -127,7 +184,6 @@ def solveLoadingProblem(str_algorithmName, flt_capacityCm3, cancellation_flag):
         )
 
     # --- ALGORITHM SELECTION AND EXECUTION ---
-    # Maps the algorithm name from the UI to the corresponding function.
     dict_algorithmMap = {
         'PSO': runPsoAlgorithm,
         'ACO': runAcoAlgorithm,
@@ -141,19 +197,12 @@ def solveLoadingProblem(str_algorithmName, flt_capacityCm3, cancellation_flag):
     tm_startTime = time.time()
     
     # --- SCALABILITY METRICS MEASUREMENT ---
-    # The 'memory_profiler' library is used here to capture peak memory usage,
-    # and the 'time' module captures computation time, directly addressing
-    # the scalability metrics for Research Question 3.
     flt_memUsage, (arr_bestSolutionIndices, tpl_bestFitness) = memory_usage(
-        # MODIFICATION: Pass the cancellation flag to the selected algorithm.
         (func_algorithm, (arr_itemsToPack, arr_packagesToLoad, evaluateSolution, cancellation_flag)),
         retval=True, max_usage=True, interval=0.1
     )
     flt_computationTime = round(time.time() - tm_startTime, 2)
     
-    # --- FIX FOR 'NoneType' ERROR ---
-    # If the algorithm was cancelled before finding any solution, arr_bestSolutionIndices might be None or empty.
-    # We now handle this case explicitly.
     if not arr_bestSolutionIndices:
         print("Algorithm returned no solution, likely due to cancellation.")
         return {
@@ -172,8 +221,6 @@ def solveLoadingProblem(str_algorithmName, flt_capacityCm3, cancellation_flag):
         }
 
     # --- POST-EXPERIMENTATION: DATA CONSOLIDATION ---
-    # After finding the best solution, re-pack it to get the final state
-    # and format all data for display and interpretation.
     obj_finalPacker = Packer()
     obj_finalPacker.add_bin(obj_bin)
     for int_i in arr_bestSolutionIndices:

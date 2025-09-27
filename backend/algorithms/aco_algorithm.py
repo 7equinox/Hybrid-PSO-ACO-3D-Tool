@@ -4,9 +4,11 @@ Module Name: Algorithms
 
 Purpose of this file:
 Implements the standalone Ant Colony Optimization (ACO) algorithm. This code
-directly corresponds to the ACO System Architecture flowchart (Figure 5)
-in Chapter 3. It serves as another baseline for comparison against the
-proposed hybrid algorithm.
+directly corresponds to the ACO System Architecture flowchart (Figure 5) in
+Chapter 3. ACO provides a memory-based, constructive search approach, which
+serves as a second critical baseline for comparison against both the standalone
+PSO and the proposed hybrid algorithm. This allows the study to assess how
+different metaheuristic strategies perform on the dynamic loading problem.
 
 Author/s:
 ALFARO, ABRAM S.
@@ -17,110 +19,142 @@ ESTONILO, JULIUS EVAN C.
 """
 import random
 import numpy as np
-from backend.simulation.exceptions import CancelledException
+from backend.simulation.custom_exceptions import CancelledException
 
-def runAcoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution, cancellation_flag,
-                    int_numAnts=20, int_maxGenerations=50,
-                    flt_alpha=1.0, flt_beta=2.0, flt_evaporationRate=0.5):
+def fn_runAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag,
+                       intNumAnts=20, intMaxGenerations=50,
+                       fltAlpha=1.0, fltBeta=2.0, fltEvaporationRate=0.5):
     """
-    Executes the complete standalone ACO algorithm.
-    """
-    int_numItems = len(arr_items)
+    Executes the complete standalone Ant Colony Optimization algorithm,
+    following the procedural flowchart (Figure 5) from the methodology.
 
-    # Heuristic Information: Similar to PSO, we use service time to provide
-    # a local guidance heuristic for the ants' decisions.
-    arr_serviceTimes = np.array([p.get('service_time', 1) for p in arr_packagesInfo])
-    arr_serviceTimes[arr_serviceTimes == 0] = 1e-6 # Avoid division by zero
+    Args:
+        arrItems (list): The list of item objects to be packed.
+        arrPackagesInfo (list): Metadata for the packages, used for heuristics.
+        funcEvaluateSolution (function): The shared fitness evaluation function.
+        dictCancellationFlag (dict): A shared flag to check for user-initiated cancellation.
+        intNumAnts (int): The number of ants in the colony for each generation.
+        intMaxGenerations (int): The number of iterations for the optimization loop.
+        fltAlpha (float): The influence factor for the pheromone trail.
+        fltBeta (float): The influence factor for the heuristic information.
+        fltEvaporationRate (float): The rate at which pheromones evaporate.
+
+    Returns:
+        tuple: The best solution found (a list of indices) and its fitness values.
+    """
+    int_numItems = len(arrItems)
+
+    # Heuristic Information: Provides a local "desirability" measure for ants
+    # when choosing their next step. As with PSO, we use service time as a heuristic
+    # to encourage ants to construct paths that prioritize items with shorter service times.
+    arr_serviceTimes = np.array([p.get('service_time', 1) for p in arrPackagesInfo])
+    arr_serviceTimes[arr_serviceTimes == 0] = 1e-6 # Avoid division by zero.
     arr_heuristicInfo = 1.0 / arr_serviceTimes
 
-    # --- INITIALIZATION ---
-    # The pheromone matrix is initialized uniformly, ensuring no initial bias in path selection.
+    # --- INITIALIZATION (Step 1 of the ACO Flowchart) ---
+    # The pheromone matrix represents the collective, long-term memory of the ant colony.
+    # mtr_pheromones[i][j] stores the learned desirability of placing item j immediately after item i.
+    # It is initialized uniformly to ensure no initial bias in path selection.
     mtr_pheromones = np.ones((int_numItems, int_numItems))
 
+    # Variables to track the best solution found across all generations.
     arr_bestSolutionEver = []
-    tpl_bestFitnessEver = (0, float('inf'), float('inf'))
+    tpl_bestFitnessEver = (0, float('inf'), float('inf')) # (Volume, Relocations, SeqLength)
 
-    # --- ITERATIVE OPTIMIZATION LOOP ---
-    # Represents the core cycle of the ACO algorithm.
+    # --- ITERATIVE OPTIMIZATION LOOP (The core cycle of the ACO Flowchart) ---
     try:
-        # NEW: Check for a cancellation request at the start of each generation.
-        for gen in range(int_maxGenerations):
-
-            print(f"ACO Generation: {gen + 1}/{int_maxGenerations}")
+        for gen in range(intMaxGenerations):
+            if dictCancellationFlag['is_cancelled']: raise CancelledException()
+            print(f"ACO Generation: {gen + 1}/{intMaxGenerations}")
 
             arr_allAntSolutions = []
-            # 1. Distribute Ants & Traverse Paths
-            for i in range(int_numAnts):
-
-                # Pass the cancellation flag down to the solution constructor.
-                arr_solution = _constructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, flt_alpha, flt_beta, cancellation_flag)
+            # --- Step 2: Ants Construct Solutions ---
+            # In each generation, a new population of "ants" independently constructs solutions.
+            # Each ant builds a permutation of items step-by-step.
+            for _ in range(intNumAnts):
+                # An ant constructs a full solution (a path).
+                arr_solution = _constructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, fltAlpha, fltBeta, dictCancellationFlag)
                 if not arr_solution: continue
 
-                # Evaluate the fitness of the constructed solution.
-                tpl_fitness = func_evaluateSolution(arr_solution)
+                # --- Step 3: Evaluate Solution Quality ---
+                # The constructed solution is evaluated using the universal fitness function.
+                tpl_fitness = funcEvaluateSolution(arr_solution)
                 arr_allAntSolutions.append((arr_solution, tpl_fitness))
 
-                # Update the best solution found across all generations.
-                # A proper multi-objective check is used here.
-                is_better = (tpl_fitness[0] >= tpl_bestFitnessEver[0] and
-                            tpl_fitness[1] <= tpl_bestFitnessEver[1] and
-                            tpl_fitness[2] <= tpl_bestFitnessEver[2] and
-                            (tpl_fitness[0] > tpl_bestFitnessEver[0] or
-                            tpl_fitness[1] < tpl_bestFitnessEver[1] or
-                            tpl_fitness[2] < tpl_bestFitnessEver[2]))
+                # Update the best-so-far solution found across the entire run.
+                # A proper multi-objective check is used: prioritize better volume,
+                # then fewer relocations for ties.
+                is_better = (tpl_fitness[0] > tpl_bestFitnessEver[0]) or \
+                            (tpl_fitness[0] == tpl_bestFitnessEver[0] and tpl_fitness[1] < tpl_bestFitnessEver[1])
                 if is_better:
                     arr_bestSolutionEver = arr_solution
                     tpl_bestFitnessEver = tpl_fitness
 
-            # --- UPDATE PHEROMONE TRAIL ---
-            # 2. Evaporate Pheromones: Reduces the influence of old trails.
-            mtr_pheromones *= (1 - flt_evaporationRate)
+            # --- Step 4: UPDATE PHEROMONE TRAIL ---
+            # This is the learning mechanism of ACO.
 
-            # 3. Deposit Pheromones: Reinforces paths that led to good solutions.
+            # 4a. Pheromone Evaporation: Globally reduces the intensity of all pheromone trails.
+            # This prevents premature convergence to suboptimal solutions by allowing the
+            # colony to "forget" old, potentially poor paths and explore new ones.
+            mtr_pheromones *= (1 - fltEvaporationRate)
+
+            # 4b. Pheromone Deposition: Reinforces the paths (item subsequences) that were
+            # part of high-quality solutions found in the current generation. Ants deposit
+            # pheromones, making these successful paths more attractive for future ants.
             for arr_solution, tpl_fitness in arr_allAntSolutions:
-                flt_pheromoneDeposit = tpl_fitness[0] # Deposit is proportional to volume utilization.
+                # The amount of pheromone deposited is proportional to the solution's quality (Volume Utilization).
+                flt_pheromoneDeposit = tpl_fitness[0]
                 if flt_pheromoneDeposit > 0:
+                    # Reinforce the edges/transitions used in this good solution.
                     for i in range(int_numItems - 1):
                         mtr_pheromones[arr_solution[i]][arr_solution[i+1]] += flt_pheromoneDeposit
 
     except CancelledException:
-        # If the process is cancelled, log it and return the best result found so far.
         print("ACO algorithm was cancelled.")
         return arr_bestSolutionEver, tpl_bestFitnessEver
 
     return arr_bestSolutionEver, tpl_bestFitnessEver
 
-def _constructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, flt_alpha, flt_beta, cancellation_flag):
-    """
-    Builds a single ant's solution (a path). The decision for the next item
-    is a probabilistic choice influenced by both the pheromone trail (global
-    knowledge) and the heuristic information (local knowledge).
-    """
-    arr_solution = []
-    list_availableItems = list(range(int_numItems))
 
+def _constructSolution(mtrPheromones, arrHeuristicInfo, intNumItems, fltAlpha, fltBeta, dictCancellationFlag):
+    """
+    Builds a single ant's solution (a complete item permutation) step-by-step.
+    The decision for the next item is a probabilistic choice influenced by both
+    the pheromone trail (global, learned knowledge) and the heuristic information
+    (local, problem-specific knowledge).
+    """
+    if dictCancellationFlag['is_cancelled']: raise CancelledException()
+
+    arr_solution = []
+    list_availableItems = list(range(intNumItems))
+
+    # Start the ant at a random item.
     if not list_availableItems: return []
     int_currentItem = random.choice(list_availableItems)
     arr_solution.append(int_currentItem)
     list_availableItems.remove(int_currentItem)
 
+    # Continue until the permutation is complete.
     while list_availableItems:
         arr_probabilities = []
-        # Calculate the probability of moving to each of the remaining items.
+        # Calculate the probability of moving from the current item to each available next item.
         for int_nextItem in list_availableItems:
-            flt_pheromoneLevel = mtr_pheromones[int_currentItem][int_nextItem] ** flt_alpha
-            flt_heuristicValue = arr_heuristicInfo[int_nextItem] ** flt_beta
+            # The choice is a weighted product of pheromone level and heuristic value.
+            flt_pheromoneLevel = mtrPheromones[int_currentItem][int_nextItem] ** fltAlpha
+            flt_heuristicValue = arrHeuristicInfo[int_nextItem] ** fltBeta
             arr_probabilities.append(flt_pheromoneLevel * flt_heuristicValue)
 
         flt_probSum = sum(arr_probabilities)
         if flt_probSum == 0:
-            # If no path has any preference, choose randomly.
+            # If no path has any preference (e.g., at the start), choose randomly.
             int_nextItem = random.choice(list_availableItems)
         else:
-            # Otherwise, choose based on the weighted probabilities (roulette wheel selection).
+            # Otherwise, choose the next item using roulette wheel selection, where
+            # paths with higher probability have a greater chance of being selected.
             arr_probabilities = [p / flt_probSum for p in arr_probabilities]
             int_nextItem = random.choices(list_availableItems, weights=arr_probabilities, k=1)[0]
 
+        # Add the chosen item to the solution and move the ant to it.
         arr_solution.append(int_nextItem)
         list_availableItems.remove(int_nextItem)
         int_currentItem = int_nextItem

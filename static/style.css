@@ -3,9 +3,10 @@ System Name: Hybrid PSO-ACO 3D Loading Optimization Tool
 Module Name: Frontend User Interface
 
 Purpose of this file:
-Provides all the CSS styles for the application's user interface, including
-layout, typography, colors, and styling for interactive components like
-modals, buttons, and tables.
+Provides all the Cascading Style Sheets (CSS) for the application's user
+interface. This includes layout (flexbox, grid), typography, colors, and
+the styling for all interactive components like modals, buttons, tables,
+and custom dropdowns.
 
 Author/s:
 ALFARO, ABRAM S.

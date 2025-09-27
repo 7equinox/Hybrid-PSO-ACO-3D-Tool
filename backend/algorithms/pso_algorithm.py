@@ -4,9 +4,10 @@ Module Name: Algorithms
 
 Purpose of this file:
 Implements the standalone Particle Swarm Optimization (PSO) algorithm. This
-code directly corresponds to the PSO System Architecture flowchart (Figure 4)
-in Chapter 3. Its performance serves as a baseline to evaluate the
-proposed hybrid algorithm against.
+code is a direct translation of the PSO System Architecture flowchart (Figure 4)
+from Chapter 3. Its performance on the defined metrics (Volume Utilization,
+Relocation Count, etc.) serves as a crucial baseline to evaluate the
+effectiveness and novelty of the proposed hybrid PSO-ACO algorithm.
 
 Author/s:
 ALFARO, ABRAM S.
@@ -18,113 +19,141 @@ ESTONILO, JULIUS EVAN C.
 import random
 import numpy as np
 from deap import base, tools
-from .base_algorithm import creator # Import the base creator definitions
-from backend.simulation.exceptions import CancelledException
+from .base_algorithm import creator  # Imports the base Fitness and Particle definitions.
+from backend.simulation.custom_exceptions import CancelledException
 
-def runPsoAlgorithm(arr_items, arr_packagesInfo, func_evaluateSolution, cancellation_flag,
-                    int_numParticles=30, int_maxGenerations=50):
+def fn_runPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag,
+                       intNumParticles=30, intMaxGenerations=50):
     """
-    Executes the complete standalone PSO algorithm.
+    Executes the complete standalone Particle Swarm Optimization algorithm,
+    following the procedural flowchart (Figure 4) from the methodology.
+
+    Args:
+        arrItems (list): The list of item objects to be packed.
+        arrPackagesInfo (list): Metadata for the packages.
+        funcEvaluateSolution (function): The fitness evaluation function.
+        dictCancellationFlag (dict): A shared flag to check for user-initiated cancellation.
+        intNumParticles (int): The size of the swarm (number of candidate solutions).
+        intMaxGenerations (int): The number of iterations for the optimization loop.
+
+    Returns:
+        tuple: The best solution found (a list of indices) and its fitness values.
     """
-    int_numItems = len(arr_items)
+    int_numItems = len(arrItems)
 
-    # Heuristic Information: Prioritize items with lower service times.
-    # This adds domain-specific knowledge to guide the search.
-    arr_serviceTimes = np.array([p.get('service_time', 1) for p in arr_packagesInfo])
-    arr_serviceTimes[arr_serviceTimes == 0] = 1
+    # Heuristic Information: Incorporates domain-specific knowledge to guide the
+    # search more effectively than a purely random process. In this case, we
+    # use service time to create a bias, as items with lower service times are
+    # often desirable to deliver earlier.
+    arr_serviceTimes = np.array([p.get('service_time', 1) for p in arrPackagesInfo])
+    arr_serviceTimes[arr_serviceTimes == 0] = 1 # Avoid issues with zero service time.
 
-    # --- INITIALIZATION ---
-    # As shown in the flowchart, we first initialize a population (swarm)
-    # of particles, each with a random permutation of items.
+    # --- INITIALIZATION (Step 1 of the PSO Flowchart) ---
+    # A population (or "swarm") of particles is created. Each "particle" represents a
+    # unique candidate solution, which in this problem is a random permutation (packing order) of items.
     obj_toolbox = base.Toolbox()
     obj_toolbox.register("permutation", random.sample, range(int_numItems), int_numItems)
     obj_toolbox.register("particle", tools.initIterate, creator.Particle, obj_toolbox.permutation)
     obj_toolbox.register("population", tools.initRepeat, list, obj_toolbox.particle)
-    obj_toolbox.register("evaluate", func_evaluateSolution)
+
+    # Register the core functions of the PSO loop with the DEAP toolbox.
+    obj_toolbox.register("evaluate", funcEvaluateSolution)
     obj_toolbox.register("update", _updateParticle, phi1=2.0, phi2=2.0, phi3=1.5,
                          service_times=arr_serviceTimes)
 
-    list_swarm = obj_toolbox.population(n=int_numParticles)
-    obj_gbest = None # The Global Best solution found so far.
+    list_swarm = obj_toolbox.population(n=intNumParticles)
+    obj_gbest = None # This will track the Global Best solution found by the entire swarm.
 
-    # --- ITERATIVE OPTIMIZATION LOOP ---
-    # This loop represents the core cycle of the PSO algorithm.
+    # --- ITERATIVE OPTIMIZATION LOOP (The core cycle of the PSO Flowchart) ---
     try:
-        for gen in range(int_maxGenerations):
-                
-            print(f"PSO Generation: {gen + 1}/{int_maxGenerations}")
-            # 1. Evaluate Fitness & Update pBest
-            for obj_particle in list_swarm:
-                # The fitness is evaluated only if it hasn't been calculated before.
-                if not obj_particle.fitness.valid:
-                    obj_particle.fitness.values = func_evaluateSolution(obj_particle) # This function also checks cancellation
+        # The loop continues until a stopping condition is met (max generations reached).
+        for gen in range(intMaxGenerations):
+            if dictCancellationFlag['is_cancelled']: raise CancelledException()
+            print(f"PSO Generation: {gen + 1}/{intMaxGenerations}")
 
-                # If the particle's current position is better than its personal best, update it.
+            for obj_particle in list_swarm:
+                # --- Step 2: Evaluate Fitness & Update Personal Best (pBest) ---
+                # Each particle's fitness is calculated using the shared evaluation function
+                # if it hasn't been evaluated already in this generation.
+                if not obj_particle.fitness.valid:
+                    obj_particle.fitness.values = funcEvaluateSolution(obj_particle)
+
+                # The particle updates its "memory" (pBest) if its current position
+                # yields a better fitness than its previously recorded personal best.
                 if not obj_particle.pbest or obj_particle.pbest.fitness < obj_particle.fitness:
                     obj_particle.pbest = creator.Particle(obj_particle)
                     obj_particle.pbest.fitness.values = obj_particle.fitness.values
 
-                # 2. Update Global Best (gBest) for the entire swarm.
+                # --- Step 3: Update Global Best (gBest) ---
+                # The Global Best for the entire swarm is updated if the current particle's
+                # fitness is better than the best fitness found so far across all particles.
                 if not obj_gbest or obj_gbest.fitness < obj_particle.fitness:
                     obj_gbest = creator.Particle(obj_particle)
                     obj_gbest.fitness.values = obj_particle.fitness.values
 
-            # 3. Compute Velocity and Update Particle Position.
+            # --- Step 4: Compute Velocity and Update Particle Position ---
+            # Each particle's velocity and position are updated based on its own
+            # experience (pBest) and the collective experience of the swarm (gBest).
             for obj_particle in list_swarm:
                 obj_toolbox.update(obj_particle, obj_gbest)
 
     except CancelledException:
+        # Handles graceful exit if the user cancels the simulation.
         print("PSO algorithm was cancelled.")
-        # FIX for NoneType: Return gbest if it exists, otherwise an empty list.
-        # This guarantees the return value is always iterable.
         solution = obj_gbest if obj_gbest else []
         fitness = obj_gbest.fitness.values if obj_gbest else (0, float('inf'), float('inf'))
         return solution, fitness
 
+    # After the loop terminates, return the best solution found.
     return obj_gbest, obj_gbest.fitness.values
 
-def _updateParticle(obj_particle, obj_gbest, phi1, phi2, phi3, service_times, w=0.5):
+
+def _updateParticle(objParticle, objGbest, phi1, phi2, phi3, service_times):
     """
-    Updates a particle's position (item permutation) based on PSO movement rules.
-    This function applies velocity to the particle, guiding it through the search space.
+    Updates a particle's position (its item permutation) by applying a calculated
+    "velocity". For this permutation-based problem, the velocity is not a vector
+    but rather a series of swaps designed to move the particle towards more
+    promising areas of the solution space.
     """
-    int_numItems = len(obj_particle)
+    int_numItems = len(objParticle)
 
     # --- Cognitive Component (Influence of pBest) ---
-    # This part of the velocity pulls the particle towards its own best-known position.
+    # This component generates swaps that pull the particle towards its own
+    # personal best-known position. It represents the particle's individual "memory" or "experience".
     arr_pbestSwaps = []
-    arr_pbestDiff = [i for i in range(int_numItems) if i < len(obj_particle.pbest) and obj_particle[i] != obj_particle.pbest[i]]
+    # Find the indices where the current position differs from the personal best.
+    arr_pbestDiff = [i for i in range(int_numItems) if i < len(objParticle.pbest) and objParticle[i] != objParticle.pbest[i]]
     if len(arr_pbestDiff) >= 2:
+        # The number of swaps is proportional to the difference.
         int_numSwaps = int(phi1 * random.random() * len(arr_pbestDiff) / 2)
-        for _ in range(int_numSwaps):
-            arr_pbestSwaps.append(tuple(random.sample(arr_pbestDiff, 2)))
+        arr_pbestSwaps.extend(tuple(random.sample(arr_pbestDiff, 2)) for _ in range(int_numSwaps))
 
     # --- Social Component (Influence of gBest) ---
-    # This part of the velocity pulls the particle towards the swarm's best-known position.
+    # This component generates swaps that pull the particle towards the swarm's
+    # global best-known position. This represents the "social" or "collective intelligence" aspect of PSO.
     arr_gbestSwaps = []
-    arr_gbestDiff = [i for i in range(int_numItems) if i < len(obj_gbest) and obj_particle[i] != obj_gbest[i]]
+    # Find the indices where the current position differs from the global best.
+    arr_gbestDiff = [i for i in range(int_numItems) if i < len(objGbest) and objParticle[i] != objGbest[i]]
     if len(arr_gbestDiff) >= 2:
         int_numSwaps = int(phi2 * random.random() * len(arr_gbestDiff) / 2)
-        for _ in range(int_numSwaps):
-            arr_gbestSwaps.append(tuple(random.sample(arr_gbestDiff, 2)))
+        arr_gbestSwaps.extend(tuple(random.sample(arr_gbestDiff, 2)) for _ in range(int_numSwaps))
 
     # --- Heuristic Component (Domain Knowledge) ---
-    # An additional component that biases the search towards solutions where items
-    # with shorter service times are packed earlier.
+    # An additional velocity component based on domain-specific knowledge. This
+    # can accelerate the search by biasing it towards solutions that are likely
+    # to be good based on external information (e.g., shorter service times).
     arr_heuristicSwaps = []
     int_numHeuristicSwaps = int(phi3 * random.random())
     for _ in range(int_numHeuristicSwaps):
         if int_numItems < 2: continue
         idx1, idx2 = random.sample(range(int_numItems), 2)
-        if idx1 > idx2: idx1, idx2 = idx2, idx1 # Ensure consistent order for swap tuple
+        # Create a swap if the item at the earlier position has a longer service time.
+        # This move pushes items with shorter service times earlier in the packing sequence.
+        if service_times[objParticle[idx1]] > service_times[objParticle[idx2]]:
+            arr_heuristicSwaps.append(tuple(sorted((idx1, idx2))))
 
-        int_item1Index = obj_particle[idx1]
-        int_item2Index = obj_particle[idx2]
-
-        if service_times[int_item1Index] > service_times[int_item2Index]:
-            arr_heuristicSwaps.append((idx1, idx2))
-
-    # Apply all computed swaps to update the particle's position.
+    # Combine all swaps and apply them to update the particle's position (its permutation).
+    # Using a set() removes any duplicate swaps that may have been generated by different components.
     arr_allSwaps = list(set(arr_pbestSwaps + arr_gbestSwaps + arr_heuristicSwaps))
     for i, j in arr_allSwaps:
-        obj_particle[i], obj_particle[j] = obj_particle[j], obj_particle[i]
+        objParticle[i], objParticle[j] = objParticle[j], objParticle[i]

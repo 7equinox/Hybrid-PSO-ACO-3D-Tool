@@ -37,7 +37,7 @@ g_str_PACKAGE_DATA_PATH = os.path.join(g_str_BASE_DIR, '../almrrc2021/almrrc2021
 
 # The cache directory stores pre-processed data. This is a critical optimization
 # to avoid re-reading and re-processing the massive source JSON files on every run.
-g_str_DATA_CACHE_DIR = os.path.join(g_str_BASE_DIR, '..', 'data_cache')
+g_str_DATA_CACHE_DIR = os.path.join(g_str_BASE_DIR, '../', 'data_cache')
 os.makedirs(g_str_DATA_CACHE_DIR, exist_ok=True)
 
 # A default cancellation flag object is provided for functions that might be called without one.

@@ -56,7 +56,7 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
     # 'Volume-Constrained Stratified Random Sampling' method. This creates smaller,
     # yet representative and solvable, problem instances, enabling a fair benchmark
     # across all algorithms without compromising the integrity of the data.
-    MAX_SAMPLE_SIZE =1000 # A hard limit to prevent out-of-memory errors.
+    MAX_SAMPLE_SIZE = 400 # A hard limit to prevent out-of-memory errors.
     if len(arr_packagesInfo) > MAX_SAMPLE_SIZE:
         print(f"Original dataset has {len(arr_packagesInfo)} items. Applying sampling to reduce to {MAX_SAMPLE_SIZE}.")
 
@@ -132,12 +132,24 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
         1e6 # Max weight is set high as our problem is volume-constrained, not weight-constrained.
     )
 
+    # The packing evaluation is the most expensive operation. A cache is
+    # introduced to store the results of previously evaluated solutions. If an
+    # algorithm re-tests the same item permutation, the cached result is
+    # returned instantly, avoiding a costly re-simulation.
+    dict_fitnessCache = {}
+
     # --- FITNESS FUNCTION (Answering RQ1 & RQ2) ---
     # This function is the heart of the evaluation. It takes a potential solution (an item packing order)
     # from an algorithm and calculates its quality based on the key research metrics: Volume Utilization,
     # Relocation Count, and Unloading Sequence Length. This single function ensures all three
     # algorithms are judged by the exact same, unbiased criteria.
     def fn_evaluateSolution(arrItemOrderIndices):
+        # Convert the solution (a list of indices) to a tuple so it can be used as a dictionary key.
+        tpl_solutionKey = tuple(arrItemOrderIndices)
+        if tpl_solutionKey in dict_fitnessCache:
+            # Return the cached fitness value immediately.
+            return dict_fitnessCache[tpl_solutionKey]
+
         # Allow the process to be cancelled gracefully mid-evaluation.
         if dictCancellationFlag['is_cancelled']:
             raise CancelledException()
@@ -157,26 +169,30 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
         arr_packedItems = obj_packer.bins[0].items
         if not arr_packedItems:
             # If the packing order results in no items being packed, return the worst-case fitness.
-            return 0, float('inf'), float('inf')
-        
-        # Delegate the calculation of all metrics to the dedicated performance_metrics module.
-        dict_metrics = fn_calculateAllMetrics(
-            arr_packedItems,
-            obj_bin.get_volume(),
-            arr_packagesToLoad
-        )
-        
-        # An 'Infeasible' solution is heavily penalized. This guides the search
-        # away from packing arrangements that result in deadlocks during unloading.
-        if dict_metrics['unloading_feasibility'] == 'Infeasible':
-             return 0, float('inf'), float('inf')
-
-        # Return the multi-objective fitness values.
-        return (
-            dict_metrics['volume_utilization'],
-            dict_metrics['relocation_count'],
-            dict_metrics['unloading_sequence_length']
-        )
+            tpl_fitness = (0, float('inf'), float('inf'))
+        else:
+            # Delegate the calculation of all metrics to the dedicated performance_metrics module.
+            dict_metrics = fn_calculateAllMetrics(
+                arr_packedItems,
+                obj_bin.get_volume(),
+                arr_packagesToLoad
+            )
+            
+            # An 'Infeasible' solution is heavily penalized. This guides the search
+            # away from packing arrangements that result in deadlocks during unloading.
+            if dict_metrics['unloading_feasibility'] == 'Infeasible':
+                tpl_fitness = (0, float('inf'), float('inf'))
+            else:
+                # Return the multi-objective fitness values.
+                tpl_fitness = (
+                        dict_metrics['volume_utilization'],
+                        dict_metrics['relocation_count'],
+                        dict_metrics['unloading_sequence_length']
+                    )
+                
+        # Store the newly computed result in the cache before returning it.
+        dict_fitnessCache[tpl_solutionKey] = tpl_fitness
+        return tpl_fitness
 
     # --- ALGORITHM SELECTION AND EXECUTION ---
     # Select and run the appropriate algorithm based on the user's choice.

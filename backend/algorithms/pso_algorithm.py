@@ -23,7 +23,7 @@ from .base_algorithm import creator  # Imports the base Fitness and Particle def
 from backend.simulation.custom_exceptions import CancelledException
 
 def fn_runPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag,
-                       intNumParticles=30, intMaxGenerations=50):
+                       intNumParticles=10, intMaxGenerations=10):
     """
     Executes the complete standalone Particle Swarm Optimization algorithm,
     following the procedural flowchart (Figure 4) from the methodology.

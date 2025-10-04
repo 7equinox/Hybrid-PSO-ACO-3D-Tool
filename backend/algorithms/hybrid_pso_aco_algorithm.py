@@ -26,7 +26,7 @@ from .base_algorithm import creator # Imports the shared Fitness and Particle st
 from backend.simulation.custom_exceptions import CancelledException
 
 def fn_runHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag,
-                                intNumParticles=30, intMaxGenerations=50, fltEvaporationRate=0.2):
+                                intNumParticles=10, intMaxGenerations=10, fltEvaporationRate=0.2):
     """
     Executes the proposed Pheromone-Augmented Particle Swarm Optimization (PACO) algorithm,
     following the procedural flowchart (Figure 6) from the methodology.

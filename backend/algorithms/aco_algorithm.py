@@ -22,7 +22,7 @@ import numpy as np
 from backend.simulation.custom_exceptions import CancelledException
 
 def fn_runAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag,
-                       intNumAnts=20, intMaxGenerations=50,
+                       intNumAnts=10, intMaxGenerations=10,
                        fltAlpha=1.0, fltBeta=2.0, fltEvaporationRate=0.5):
     """
     Executes the complete standalone Ant Colony Optimization algorithm,

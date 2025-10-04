@@ -1,44 +1,45 @@
 # HYBRID PSO-ACO 3D LOADING OPTIMIZATION TOOL
 
-This project is an interactive, experimental software tool developed for the research titled: **"OPTIMIZING DYNAMIC 3D LOADING AND UNLOADING FOR DELIVERY VEHICLES USING HYBRID PARTICLE SWARM AND ANT COLONY ALGORITHM"**.
+This project presents an interactive software instrument developed to empirically validate the research titled: **"OPTIMIZING DYNAMIC 3D LOADING AND UNLOADING FOR DELIVERY VEHICLES USING HYBRID PARTICLE SWARM AND ANT COLONY ALGORITHM"**.
 
-It provides a platform for the direct simulation and comparison of three metaheuristic algorithms—Particle Swarm Optimization (PSO), Ant Colony Optimization (ACO), and the proposed hybrid PSO-ACO—on complex, dynamic 3D vehicle loading problems derived from a real-world dataset.
+The application serves as a high-fidelity simulation environment for the rigorous comparison of three metaheuristic algorithms: Particle Swarm Optimization (PSO), Ant Colony Optimization (ACO), and our proposed hybrid PSO-ACO. These algorithms are applied to solve complex 3D vehicle loading problems using a real-world dataset, providing a robust platform for experimental analysis.
 
 ---
 
 ## 1. Addressing the Research Problem (Chapter 1)
 
-The primary purpose of this software is to serve as the research instrument to answer the study's central **Statement of the Problem**. Traditional optimization heuristics often excel at maximizing packing density but critically neglect the operational feasibility of unloading items according to a specific delivery sequence. This oversight leads to inefficient last-mile operations, increased item handling (relocations), and in worst-case scenarios, completely blocked or inaccessible packages (infeasible loads).
+The central purpose of this software is to provide definitive answers to the study's **Statement of the Problem**. The core challenge addressed is that conventional packing algorithms are designed to maximize one objective—how much can be fit into a space—while failing to consider a crucial operational reality: the efficiency of unloading packages according to a pre-defined delivery route. This gap leads to operational bottlenecks, excessive package handling, and potentially infeasible unloading scenarios where packages are physically blocked.
 
-This software directly addresses these research gaps by:
+This software is engineered to bridge this critical gap by providing the means to test our research hypotheses:
 
-*   **Measuring Operational Viability:** Going beyond simple volume metrics, the tool simulates the entire unloading process for each solution to calculate the critical dependent variables for this study: **Relocation Count**, **Unloading Feasibility**, and **Unloading Sequence Length**. This directly confronts the issue that existing algorithms often fail to measure unloading efficiency.
+*   **Quantifying Unloading Efficiency:** The tool moves beyond simple density metrics. For every potential solution, it simulates the entire unloading sequence to compute the study's key dependent variables: **Relocation Count**, **Unloading Feasibility**, and **Unloading Sequence Length**. This directly confronts the primary deficiency in existing models and provides the data to answer **Research Question 1 (Loading)** and **Research Question 2 (Unloading)** by comparing how effectively each algorithm minimizes wasted operational effort.
 
-*   **Enabling Direct, Fair Comparison:** The tool allows a user to run standalone PSO, standalone ACO, and the proposed Hybrid PSO-ACO on identical problem instances. This experimental design generates the data needed to answer **Research Question 1 (Loading)** and **Research Question 2 (Unloading)** regarding the performance differences among the algorithms.
+*   **Evaluating Scalability and Resourcefulness:** The software meticulously tracks **Computation Time** and **Memory Usage** for every simulation run. This provides the empirical data required to address **Research Question 3**, which investigates how each algorithm scales in performance and resource consumption as the problem size increases.
 
-*   **Testing Scalability:** By allowing simulations across the various real-world vehicle capacities from the Amazon dataset, the tool precisely measures **Computation Time** and **Memory Usage**. This directly addresses **Research Question 3** on algorithm scalability and provides empirical data on which algorithm is most efficient as problem complexity increases.
-
-*   **Simulating Dynamic Conditions:** The software implements the "Dynamic Constraint" specified in the methodology, where 10-20% of items are randomly removed before optimization. This mimics real-world disruptions (e.g., last-minute order cancellations) and tests the robustness and adaptability of each algorithm, a key challenge in dynamic logistics.
+*   **Simulating Real-World Disruptions:** A key feature is the ability to toggle a **Dynamic Constraint**. When activated, this feature mimics real-world uncertainty by removing 10-20% of packages just before optimization begins, testing the adaptability and robustness of each algorithm against unforeseen changes—a common challenge in logistics.
 
 ---
 
-## 2. Alignment with System Architecture (Chapter 3)
+## 2. System Architecture and Performance Strategy (Chapter 3)
 
-The software's architecture is a direct and faithful implementation of the designs outlined in Chapter 3 of the research methodology.
+The software's architecture is a direct translation of the designs specified in Chapter 3 of the methodology. Further, it incorporates a deliberate performance strategy to ensure the tool is practical for real-time analysis and demonstration on standard hardware.
 
-### Particle Swarm Optimization (PSO) - (Figure 4)
-*   **Implementation:** `backend/algorithms/pso_algorithm.py`
-*   **How it Aligns:** The `fn_runPsoAlgorithm` function follows the PSO flowchart precisely. It begins by initializing a "swarm" of "particles," where each particle is a candidate packing sequence. In each iteration, it evaluates the multi-objective fitness of each particle, updates its Personal Best (`pbest`), and updates the swarm's Global Best (`gbest`). The `_updateParticle` function then calculates a new "velocity" (a series of item swaps) to guide the particle's search based on its own experience, the swarm's experience, and heuristic information.
+### Algorithm Implementation
+*   **Particle Swarm Optimization (PSO) - (Figure 4):** Implemented in `backend/algorithms/pso_algorithm.py`, this module simulates a swarm of particles (candidate solutions) navigating a search space. Each particle adjusts its trajectory based on its own best-found solution and the global best-found solution of the swarm.
 
-### Ant Colony Optimization (ACO) - (Figure 5)
-*   **Implementation:** `backend/algorithms/aco_algorithm.py`
-*   **How it Aligns:** The `fn_runAcoAlgorithm` function models the behavior of an ant colony. It initializes an "ant population" where each ant constructs a solution path. After each generation, "pheromones" are evaporated globally and then deposited on the paths of the best-performing solutions, reinforcing successful subsequences. The `_constructSolution` function shows how ants probabilistically choose their next step based on a combination of these pheromone trails (collective memory) and local heuristic information.
+*   **Ant Colony Optimization (ACO) - (Figure 5):** Implemented in `backend/algorithms/aco_algorithm.py`, this module models the foraging behavior of ants. It uses a probabilistic construction approach where artificial ants build solutions based on "pheromone trails," a collective memory of which solution components have historically led to high-quality results.
 
-### Hybrid PSO-ACO Algorithm - (Figure 6)
-*   **Implementation:** `backend/algorithms/hybrid_pso_aco_algorithm.py`
-*   **How it Aligns:** This file embodies the proposed Pheromone-Augmented Particle Swarm Optimization (PACO) framework. It merges the two architectures:
-    *   **Pheromone Influence on Velocity:** The `_updateParticleHybrid` function contains the augmented velocity equation, the core of the hybridization. A particle's movement is now influenced not just by its `pbest` and the `gbest` (PSO), but also by a **new pheromone-guided component**. This component introduces swaps that move items toward positions that are strongly favored by the pheromone matrix, guiding PSO's global search with ACO's learned local-structure knowledge.
-    *   **Weighted Pheromone Update:** As shown in the hybrid flowchart, after each generation, the top-performing "elite" particles are used to deposit pheromones. This creates a powerful feedback loop where PSO's global exploration finds good solutions, and the characteristics of those good solutions are encoded into the ACO pheromone matrix to guide future explorations more effectively toward unload-feasible configurations.
+*   **Hybrid PSO-ACO Algorithm - (Figure 6):** The core of our research, implemented in `backend/algorithms/hybrid_pso_aco_algorithm.py`. This novel architecture integrates ACO's pheromone mechanism directly into PSO's velocity update equation. This allows the global-search strength of PSO to be intelligently guided by the local, constructive learning of ACO, creating a feedback loop designed to rapidly converge on solutions that are both space-efficient and operationally sound.
+
+### Strategy for Performance Optimization
+
+To ensure a fluid and practical user experience during live demonstrations, particularly on hardware with limited physical memory, a multi-faceted performance strategy was implemented:
+
+1.  **Strategic Down-Sampling (`MAX_SAMPLE_SIZE = 400`):** Instead of processing the entire dataset of over 80,000 items, which is computationally infeasible, the system employs volume-constrained stratified sampling to create a smaller, representative problem instance. This reduces memory pressure and algorithm complexity while preserving the statistical properties of the original dataset.
+
+2.  **Parameter Tuning:** The operational parameters for each algorithm (e.g., `intNumParticles`, `intNumAnts`, `intMaxGenerations`) have been tuned to balance search thoroughness with execution speed. The current values (`10` agents, `10` generations) are set to achieve demonstration runtimes of approximately 3-10 minutes per simulation for PSO and Hybrid PSO-ACO. On the other hand, ACO has a running time of approximately 40-50 minutes.
+
+3.  **Computational Memoization (Fitness Caching):** The most computationally intensive task is evaluating the fitness of a given packing solution. A cache has been implemented within the `simulation_orchestrator`. If an algorithm attempts to evaluate a solution that has been seen before, the cached result is returned instantly, avoiding redundant calculations and significantly accelerating the optimization process.
 
 ---
 
@@ -76,26 +77,26 @@ The software's architecture is a direct and faithful implementation of the desig
     ```
 
 4.  **Dataset Configuration:**
-    *   By default, the project is configured to use the **2021 Amazon Last Mile Routing Research Challenge Dataset**.
-    *   Ensure you have downloaded and placed the `eval_route_data.json` and `eval_package_data.json` files in the `backend/almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/` directory.
+    *   This project is configured to use the **2021 Amazon Last Mile Routing Research Challenge Dataset**.
+    *   Ensure the `eval_route_data.json` and `eval_package_data.json` files are placed within the `backend/almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/` directory.
 
 ---
 
 ## 5. Running the Application
 
-Once the setup is complete, start the Flask web server from the project's root directory:
+Once the setup is complete, launch the Flask web server from the project's root directory:
 
 ```bash
 python backend/main_app.py
 ```
 
-Open a web browser and navigate to `http://127.0.0.1:5000` to access the tool.
+Open a web browser and navigate to `http://127.0.0.1:5000`.
 
 ### How to Use the Tool:
 
-1.  Click the **"Modify Simulation"** gear icon.
-2.  Choose an **Optimization Algorithm** to test (PSO, ACO, or the proposed PSO-ACO).
-3.  Select a **Vehicle Volume Capacity** from the dropdown. The application will asynchronously load a valid sample route for that capacity. You can cancel this data-loading process.
-4.  Once the initial data is loaded, click the **"Simulate"** button to run the experiment.
-5.  A loader will appear indicating the algorithm is running. You can cancel the simulation at any point.
-6.  Upon completion, the results, including all scalability (Time, Memory) and loading/unloading (Volume Util, Relocations, Feasibility, Sequence Length) metrics, will be displayed on the right-hand side.
+1.  Launch the configuration modal by clicking the **"Modify Simulation"** gear icon.
+2.  Select your desired **Optimization Algorithm** (PSO, ACO, or PSO-ACO).
+3.  Choose a **Vehicle Volume Capacity** from the dropdown menu. The application will then load a sample route and its associated data.
+4.  **Configure the Dynamic Constraint.** Use the toggle switch to enable or disable the simulation of real-world disruptions.
+5.  Press the **"Simulate"** button to initiate the experiment. A loader will indicate that the process is running.
+6.  Upon completion, the right-hand panel will populate with the comprehensive results, detailing all scalability and operational efficiency metrics for the selected algorithm.

@@ -97,6 +97,17 @@ def _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFAUL
     str_cacheFilename = f"{fltVehicleCapacityCm3}.json"
     str_cacheFilepath = os.path.join(g_str_DATA_CACHE_DIR, str_cacheFilename)
 
+    # DISABLE THIS PROCESS
+    # Scan the cache directory and remove any JSON files that do not match the
+    # currently requested capacity. This enforces the "only one cache file" rule.
+    # try:
+    #     for str_existing_file in os.listdir(g_str_DATA_CACHE_DIR):
+    #         if str_existing_file.endswith('.json') and str_existing_file != str_cacheFilename:
+    #             print(f"Removing outdated cache file: {str_existing_file}")
+    #             os.remove(os.path.join(g_str_DATA_CACHE_DIR, str_existing_file))
+    # except Exception as obj_err:
+    #     print(f"Warning: Could not clear old cache files. Error: {obj_err}")
+
     # If a pre-processed cache file already exists, load and return it directly. This is the fast path.
     if os.path.exists(str_cacheFilepath):
         if dictCancellationFlag['is_cancelled']: raise CancelledException()

@@ -110,11 +110,11 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
     # To test the algorithms' adaptability to real-world disruptions (like last-minute
     # order changes), a random subset (10-20%) of items is removed from the problem
     # instance just before optimization begins.
-    # if len(arr_packagesInfo) > 1:
-    #     int_numToRemove = int(len(arr_packagesInfo) * random.uniform(0.1, 0.2))
-    #     arr_packagesToLoad = random.sample(arr_packagesInfo, len(arr_packagesInfo) - int_numToRemove)
-    # else:
-    arr_packagesToLoad = arr_packagesInfo
+    if len(arr_packagesInfo) > 1:
+        int_numToRemove = int(len(arr_packagesInfo) * random.uniform(0.1, 0.2))
+        arr_packagesToLoad = random.sample(arr_packagesInfo, len(arr_packagesInfo) - int_numToRemove)
+    else:
+        arr_packagesToLoad = arr_packagesInfo
 
     # Convert the problem data into the format required by the `py3dbp` library.
     arr_itemsToPack = [Item(p['id'], p['width'], p['height'], p['depth'], 1) for p in arr_packagesToLoad]

@@ -47,7 +47,7 @@ g_dict_runningDataLoads = {}
 g_obj_dataLoadLock = Lock()
 
 
-def _executeSimulationInThread(strSimulationId, strAlgorithmName, fltCapacityCm3):
+def _executeSimulationInThread(strSimulationId, strAlgorithmName, fltCapacityCm3, blnIsDynamicConstraintEnabled):
     """
     This function is the target for a background thread that executes a simulation.
     Running the optimization algorithm here prevents the user's web browser from
@@ -62,7 +62,12 @@ def _executeSimulationInThread(strSimulationId, strAlgorithmName, fltCapacityCm3
         dict_cancellationFlag = g_dict_runningSimulations[strSimulationId]['cancellation_flag']
 
         # Delegate the complex logic of the simulation to the orchestrator module.
-        dict_results = fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dict_cancellationFlag)
+        dict_results = fn_orchestrateSimulationRun(
+            strAlgorithmName, 
+            fltCapacityCm3, 
+            dict_cancellationFlag, 
+            blnIsDynamicConstraintEnabled
+        )
 
         # Use a lock to safely update the shared global dictionary with the results.
         with g_obj_simulationLock:
@@ -226,12 +231,13 @@ def handleStartSimulationRequest():
     obj_data = request.get_json()
     str_algorithmName = obj_data.get('algorithm')
     flt_capacityCm3 = float(obj_data.get('capacity'))
+    bln_isDynamicConstraintEnabled = obj_data.get('dynamic_constraint_enabled', True) # Default to True if not provided
     str_simulationId = str(uuid.uuid4())
 
     dict_cancellationFlag = {'is_cancelled': False}
     obj_thread = Thread(
         target=_executeSimulationInThread,
-        args=(str_simulationId, str_algorithmName, flt_capacityCm3)
+        args=(str_simulationId, str_algorithmName, flt_capacityCm3, bln_isDynamicConstraintEnabled)
     )
 
     with g_obj_simulationLock:

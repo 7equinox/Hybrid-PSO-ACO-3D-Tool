@@ -42,6 +42,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const arr_algoButtons = document.querySelectorAll(".modal-options button");
     const obj_capacitySelect = document.getElementById("vehicle-capacity-select");
     const obj_initialTableBody = document.getElementById('initial-item-table-body');
+    const obj_dynamicConstraintToggle = document.getElementById('dynamic-constraint-toggle');
 
     // --- INITIALIZATION ---
     // This function is called once the page is fully loaded to populate the initial UI elements.
@@ -235,13 +236,22 @@ document.addEventListener("DOMContentLoaded", () => {
             alert("Please select a vehicle capacity and wait for its data to load first.");
             return;
         }
+        
+        // Read the state of the new toggle switch.
+        const bln_isDynamicConstraintEnabled = obj_dynamicConstraintToggle.checked;
+        
         obj_modal.style.display = "none";
         _fnShowLoader("Starting simulation...", { showSimCancel: true, simCancelDisabled: true });
+        
         try {
             const response = await fetch('/start_simulation', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ algorithm: g_str_selectedAlgorithm, capacity: g_str_selectedCapacity }),
+                body: JSON.stringify({ 
+                    algorithm: g_str_selectedAlgorithm, 
+                    capacity: g_str_selectedCapacity,
+                    dynamic_constraint_enabled: bln_isDynamicConstraintEnabled // Send toggle state to backend
+                }),
             });
             const data = await response.json();
             if (data.status === 'started') {
@@ -268,7 +278,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
         _fnShowLoader(`Simulation in progress… Please wait.`, { showSimCancel: true });
         try {
-            obj_cancelSimBtn.style.display = 'none';
             const response = await fetch(`/simulation_status/${g_str_currentSimulationId}`);
             if (!response.ok) throw new Error(`Server status check failed: ${response.statusText}`);
             const data = await response.json();

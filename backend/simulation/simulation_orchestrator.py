@@ -31,7 +31,7 @@ from backend.algorithms.pso_algorithm import fn_runPsoAlgorithm
 from backend.algorithms.aco_algorithm import fn_runAcoAlgorithm
 from backend.algorithms.hybrid_pso_aco_algorithm import fn_runHybridPsoAcoAlgorithm
 
-def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag):
+def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled):
     """
     This is the main function for a single experimental run. It orchestrates
     the entire process from data loading to algorithm execution and result
@@ -109,11 +109,16 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
     # --- DYNAMIC CONSTRAINT IMPLEMENTATION (from Chapter 3 Methodology) ---
     # To test the algorithms' adaptability to real-world disruptions (like last-minute
     # order changes), a random subset (10-20%) of items is removed from the problem
-    # instance just before optimization begins.
-    if len(arr_packagesInfo) > 1:
-        int_numToRemove = int(len(arr_packagesInfo) * random.uniform(0.1, 0.2))
-        arr_packagesToLoad = random.sample(arr_packagesInfo, len(arr_packagesInfo) - int_numToRemove)
+    # instance just before optimization begins. This is now controlled by a toggle on the frontend.
+    if blnIsDynamicConstraintEnabled:
+        print("Dynamic constraint is ENABLED. Removing 10-20% of items from the problem.")
+        if len(arr_packagesInfo) > 1:
+            int_numToRemove = int(len(arr_packagesInfo) * random.uniform(0.1, 0.2))
+            arr_packagesToLoad = random.sample(arr_packagesInfo, len(arr_packagesInfo) - int_numToRemove)
+        else:
+            arr_packagesToLoad = arr_packagesInfo
     else:
+        print("Dynamic constraint is DISABLED. Using the full set of sampled items.")
         arr_packagesToLoad = arr_packagesInfo
 
     # Convert the problem data into the format required by the `py3dbp` library.

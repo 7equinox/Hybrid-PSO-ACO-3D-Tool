@@ -32,6 +32,11 @@ ESTONILO, JULIUS EVAN C.
         LEFT SECTION - Displays Initial Dataset Information
         ================================================================== -->
         <div class="left-section">
+            <!-- NEW: Guides Button -->
+            <div id="openGuidesBtn" class="guides-btn">
+                <i class="fa-solid fa-book-open"></i>
+                <p>User Guide</p>
+            </div>
             <h1>2021 Amazon Last Mile Routing Research Challenge Dataset</h1>
             <div class="banners">
                 <div class="white-bg">
@@ -210,6 +215,46 @@ ESTONILO, JULIUS EVAN C.
             </div>
         </div>
     </div>
+    
+    <!-- =================================================================
+    NEW MODAL - For Guides
+    ================================================================== -->
+    <div id="guidesModal" class="modal" style="display: flex;"> <!-- Set to display: flex to be visible on load -->
+        <div class="modal-content guides-content">
+            <i id="closeGuidesBtn" class="fa-solid fa-xmark"></i>
+            <h2>How to Use This Tool</h2>
+            <p class="guides-intro">This tool allows you to simulate and compare different algorithms for optimizing 3D vehicle loading. Follow these steps to run an experiment:</p>
+            
+            <ol class="guides-list">
+                <li>
+                    <strong>Open Simulation Settings:</strong>
+                    <p>Click the <i class="fa-solid fa-gear"></i> <strong>Modify Simulation</strong> button at the top-right of the screen to open the configuration panel.</p>
+                </li>
+                <li>
+                    <strong>Select an Algorithm:</strong>
+                    <p>Choose one of the three available optimization algorithms: PSO, ACO, or the hybrid PSO-ACO.</p>
+                </li>
+                <li>
+                    <strong>Choose a Vehicle:</strong>
+                    <p>Select a vehicle capacity from the dropdown menu. The application will then automatically load a valid set of packages corresponding to that vehicle size, displaying the data on the left panel.</p>
+                </li>
+                 <li>
+                    <strong>(Optional) Set the Dynamic Constraint:</strong>
+                    <p>Use the toggle switch to enable or disable the dynamic constraint. When enabled, the simulation will mimic a real-world disruption by unexpectedly removing 10-20% of packages, forcing the algorithm to adapt.</p>
+                </li>
+                <li>
+                    <strong>Run the Simulation:</strong>
+                    <p>Click the <strong>Simulate</strong> button. A loading indicator will appear while the backend server performs the complex calculations. You can cancel a running process at any time.</p>
+                </li>
+                <li>
+                    <strong>Analyze the Results:</strong>
+                    <p>Once complete, the right-hand panel will display the outcome, including key metrics like Volume Utilization, Relocation Count, Execution Time, and Memory Usage.</p>
+                </li>
+            </ol>
+             <button id="gotItBtn" class="got-it-btn">Got It!</button>
+        </div>
+    </div>
+
 
     <!-- =================================================================
     SPINNER LOADER - For indicating processing status

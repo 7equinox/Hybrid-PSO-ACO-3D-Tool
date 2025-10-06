@@ -43,10 +43,18 @@ document.addEventListener("DOMContentLoaded", () => {
     const obj_capacitySelect = document.getElementById("vehicle-capacity-select");
     const obj_initialTableBody = document.getElementById('initial-item-table-body');
     const obj_dynamicConstraintToggle = document.getElementById('dynamic-constraint-toggle');
+    
+    // --- NEW: DOM elements for the Guides Modal ---
+    const obj_guidesModal = document.getElementById("guidesModal");
+    const obj_openGuidesBtn = document.getElementById("openGuidesBtn");
+    const obj_closeGuidesBtn = document.getElementById("closeGuidesBtn");
+    const obj_gotItBtn = document.getElementById("gotItBtn");
+
 
     // --- INITIALIZATION ---
     // This function is called once the page is fully loaded to populate the initial UI elements.
     _fnLoadInitialCapacities();
+    // The Guides modal is already set to be visible via inline CSS on page load.
 
     /**
      * Asynchronously fetches the list of all available vehicle capacities from the backend.
@@ -82,9 +90,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- EVENT LISTENERS ---
     // Binds user actions (clicks, selections) to their corresponding handler functions.
+
+    // Listeners for the main Simulation Settings Modal
     obj_openModalBtn.onclick = () => { obj_modal.style.display = "flex"; };
     obj_closeModalBtn.onclick = () => { obj_modal.style.display = "none"; };
-    window.onclick = (e) => { if (e.target === obj_modal) { obj_modal.style.display = "none"; }};
+    
+    // Listeners for the NEW Guides Modal
+    obj_openGuidesBtn.onclick = () => { obj_guidesModal.style.display = "flex"; };
+    obj_closeGuidesBtn.onclick = () => { obj_guidesModal.style.display = "none"; };
+    obj_gotItBtn.onclick = () => { obj_guidesModal.style.display = "none"; };
+
+    window.onclick = (e) => { 
+        if (e.target === obj_modal) { obj_modal.style.display = "none"; }
+        if (e.target === obj_guidesModal) { obj_guidesModal.style.display = "none"; }
+    };
+
     obj_clearSimBtn.addEventListener("click", () => { location.reload(); }); // Resets the application.
     obj_cancelLoadBtn.addEventListener('click', () => { _fnCancelDataLoading(); });
     obj_cancelSimBtn.addEventListener('click', () => { _fnCancelSimulation(); });
@@ -276,7 +296,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (!g_str_currentSimulationId) return;
 
-        _fnShowLoader(`Simulation in progress… Please wait.`, { showSimCancel: false });
+        _fnShowLoader(`Simulation in progress… Please wait.`, { showSimCancel: true });
         try {
             const response = await fetch(`/simulation_status/${g_str_currentSimulationId}`);
             if (!response.ok) throw new Error(`Server status check failed: ${response.statusText}`);
@@ -291,6 +311,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 clearInterval(g_obj_simPollingInterval);
                 alert(`Simulation Error: ${data.result.error}`);
                 _fnHideLoader();
+            } else if (data.status === 'cancelled') {
+                 clearInterval(g_obj_simPollingInterval);
+                 _fnHideLoader();
             }
              // If status is 'running', do nothing and wait for the next interval.
         } catch (error) {

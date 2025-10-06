@@ -63,6 +63,7 @@ h3 {
 .left-section {
     flex: 1;
     padding: 15px 30px 0 30px;
+    position: relative; /* Added for positioning the guides button */
 }
 
 .right-section {
@@ -132,6 +133,28 @@ h3 {
     top: 0;
 }
 
+/* NEW: Style for the Guides Button */
+.guides-btn {
+    position: absolute;
+    top: -45px; /* Position it above the container */
+    left: 30px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #121212;
+    background-color: #e0e0e0;
+    padding: 8px 15px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+.guides-btn:hover {
+    background-color: #d1d1d1;
+}
+.guides-btn i {
+    color: #e08128;
+}
 
 /* --- Component Styles: Tables --- */
 .table {
@@ -206,9 +229,10 @@ td:not(:first-child) {
     padding: 30px;
     position: relative;
     width: fit-content;
+    animation: fadeIn 0.3s ease-out; /* Add animation */
 }
 
-.modal-content i {
+.modal-content i.fa-xmark {
     border-radius: 20px;
     color: white;
     cursor: pointer;
@@ -408,6 +432,52 @@ input:checked + .slider:before {
 }
 .slider.round:before {
     border-radius: 50%;
+}
+
+
+/* --- NEW: GUIDES MODAL STYLES --- */
+.guides-content {
+    max-width: 900px;
+    text-align: left;
+}
+.guides-content h2 {
+    text-align: center;
+    margin-bottom: 10px;
+}
+.guides-intro {
+    text-align: center;
+    color: #d1d1d1;
+    margin-bottom: 25px;
+}
+.guides-list {
+    list-style-position: inside;
+    margin-left: 10px;
+}
+.guides-list li {
+    margin-bottom: 20px;
+}
+.guides-list li p {
+    color: #b0b0b0;
+    margin-left: 25px;
+    margin-top: 5px;
+}
+.guides-list li i {
+    color: #e08128;
+}
+.got-it-btn {
+    display: block;
+    margin: 25px auto 0 auto;
+    background-color: #e08128;
+    color: white;
+    font-weight: 700;
+    padding: 12px 40px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    text-transform: uppercase;
+}
+.got-it-btn:hover {
+    background-color: #90541c !important;
 }
 
 

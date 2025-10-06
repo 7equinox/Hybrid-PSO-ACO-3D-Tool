@@ -32,7 +32,6 @@ ESTONILO, JULIUS EVAN C.
         LEFT SECTION - Displays Initial Dataset Information
         ================================================================== -->
         <div class="left-section">
-            <!-- NEW: Guides Button -->
             <div id="openGuidesBtn" class="guides-btn">
                 <i class="fa-solid fa-book-open"></i>
                 <p>User Guide</p>
@@ -217,9 +216,9 @@ ESTONILO, JULIUS EVAN C.
     </div>
     
     <!-- =================================================================
-    NEW MODAL - For Guides
+    GUIDES MODAL - With highlighted text
     ================================================================== -->
-    <div id="guidesModal" class="modal" style="display: flex;"> <!-- Set to display: flex to be visible on load -->
+    <div id="guidesModal" class="modal" style="display: flex;">
         <div class="modal-content guides-content">
             <i id="closeGuidesBtn" class="fa-solid fa-xmark"></i>
             <h2>How to Use This Tool</h2>
@@ -228,11 +227,11 @@ ESTONILO, JULIUS EVAN C.
             <ol class="guides-list">
                 <li>
                     <strong>Open Simulation Settings:</strong>
-                    <p>Click the <i class="fa-solid fa-gear"></i> <strong>Modify Simulation</strong> button at the top-right of the screen to open the configuration panel.</p>
+                    <p>Click the <i class="fa-solid fa-gear"></i> <strong><span class="highlight-text">Modify Simulation</span></strong> button at the top-right of the screen to open the configuration panel.</p>
                 </li>
                 <li>
                     <strong>Select an Algorithm:</strong>
-                    <p>Choose one of the three available optimization algorithms: PSO, ACO, or the hybrid PSO-ACO.</p>
+                    <p>Choose one of the three available optimization algorithms: <span class="highlight-text">PSO</span>, <span class="highlight-text">ACO</span>, or the <span class="highlight-text">hybrid PSO-ACO</span>.</p>
                 </li>
                 <li>
                     <strong>Choose a Vehicle:</strong>
@@ -240,15 +239,23 @@ ESTONILO, JULIUS EVAN C.
                 </li>
                  <li>
                     <strong>(Optional) Set the Dynamic Constraint:</strong>
-                    <p>Use the toggle switch to enable or disable the dynamic constraint. When enabled, the simulation will mimic a real-world disruption by unexpectedly removing 10-20% of packages, forcing the algorithm to adapt.</p>
+                    <p>Use the toggle switch to enable or disable the dynamic constraint. When enabled, the simulation will mimic a real-world disruption by <span class="highlight-text">removing 10-20% of packages</span>, forcing the algorithm to adapt.</p>
                 </li>
                 <li>
                     <strong>Run the Simulation:</strong>
-                    <p>Click the <strong>Simulate</strong> button. A loading indicator will appear while the backend server performs the complex calculations. You can cancel a running process at any time.</p>
+                    <p>Click the <strong><span class="highlight-text">Simulate</span></strong> button. A loading indicator will appear while the backend server performs the complex calculations. You can cancel a running process at any time.</p>
                 </li>
                 <li>
                     <strong>Analyze the Results:</strong>
-                    <p>Once complete, the right-hand panel will display the outcome, including key metrics like Volume Utilization, Relocation Count, Execution Time, and Memory Usage.</p>
+                    <p>
+                        Once complete, the right-hand panel will display the outcome, including key metrics like 
+                        <span class="highlight-text">Execution Time</span>, 
+                        <span class="highlight-text">Memory Usage</span>, 
+                        <span class="highlight-text">Volume Utilization</span>, 
+                        <span class="highlight-text">Relocation Count</span>, 
+                        <span class="highlight-text">Unloading Feasibility</span>, and 
+                        <span class="highlight-text">Unloading Sequence Length</span>.
+                    </p>
                 </li>
             </ol>
              <button id="gotItBtn" class="got-it-btn">Got It!</button>
@@ -263,9 +270,7 @@ ESTONILO, JULIUS EVAN C.
         <div class="loader-content">
             <i class="fa-solid fa-spinner fa-spin fa-3x"></i>
             <p style="margin-top: 20px;">Please Wait...</p>
-            <!-- The data-loading cancel button is hidden by default -->
             <button id="cancel-load-btn" style="display: none;">Cancel Loading</button>
-            <!-- The NEW simulation cancel button is also hidden by default -->
             <button id="cancel-sim-btn" style="display: none;">Cancel Simulation</button>
         </div>
     </div>

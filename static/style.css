@@ -75,6 +75,9 @@ h3 {
     position: relative;
 }
 
+#result-algorithm-name {
+    color: #e08128;
+}
 
 /* --- Component Styles: Banners & Metrics --- */
 .banners {
@@ -133,10 +136,9 @@ h3 {
     top: 0;
 }
 
-/* NEW: Style for the Guides Button */
 .guides-btn {
     position: absolute;
-    top: -45px; /* Position it above the container */
+    top: -45px;
     left: 30px;
     display: flex;
     align-items: center;
@@ -229,7 +231,7 @@ td:not(:first-child) {
     padding: 30px;
     position: relative;
     width: fit-content;
-    animation: fadeIn 0.3s ease-out; /* Add animation */
+    animation: fadeIn 0.3s ease-out;
 }
 
 .modal-content i.fa-xmark {
@@ -259,22 +261,24 @@ td:not(:first-child) {
     background-color: #343434;
     border: 1px solid #393939;
     border-radius: 10px;
-    color: #ffffff;
+    color: #e08128;
     cursor: pointer;
     font-size: 24px;
     font-weight: 700;
     line-height: 1.2;
     padding: 15px 20px;
-    transition: background-color 0.2s;
+    transition: background-color 0.2s, color 0.2s;
     width: 230px;
 }
 
 .modal-content button:hover {
     background-color: #e08128;
+    color: #ffffff;
 }
 
 .modal-options .active {
     background-color: #90541c;
+    color: #ffffff;
 }
 
 .custom-select-wrapper {
@@ -327,8 +331,6 @@ select.currency-select option {
     }
 }
 
-/* Note: Hover effects on <option> elements are not consistently supported across all browsers.
-   This rule is included for browsers that do support it. */
 select.currency-select option:hover {
     background: #90541c;
 }
@@ -358,7 +360,7 @@ select.currency-select option:hover {
     color: #ffffff;
 }
 
-#cancel-load-btn
+#cancel-load-btn,
 #cancel-sim-btn {
     margin-top: 25px;
     font-size: 16px;
@@ -435,7 +437,7 @@ input:checked + .slider:before {
 }
 
 
-/* --- NEW: GUIDES MODAL STYLES --- */
+/* --- GUIDES MODAL STYLES --- */
 .guides-content {
     max-width: 900px;
     text-align: left;
@@ -478,6 +480,12 @@ input:checked + .slider:before {
 }
 .got-it-btn:hover {
     background-color: #90541c !important;
+}
+
+/* NEW: Style for highlighted text within the guide */
+.guides-content .highlight-text {
+    color: #e08128;
+    font-weight: 500;
 }
 
 

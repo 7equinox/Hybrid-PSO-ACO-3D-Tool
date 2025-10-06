@@ -75,10 +75,6 @@ h3 {
     position: relative;
 }
 
-#result-algorithm-name {
-    color: #e08128;
-}
-
 /* --- Component Styles: Banners & Metrics --- */
 .banners {
     display: grid;
@@ -261,7 +257,7 @@ td:not(:first-child) {
     background-color: #343434;
     border: 1px solid #393939;
     border-radius: 10px;
-    color: #e08128;
+    color: #ffffff;
     cursor: pointer;
     font-size: 24px;
     font-weight: 700;
@@ -439,7 +435,7 @@ input:checked + .slider:before {
 
 /* --- GUIDES MODAL STYLES --- */
 .guides-content {
-    max-width: 900px;
+    max-width: 1200px;
     text-align: left;
 }
 .guides-content h2 {

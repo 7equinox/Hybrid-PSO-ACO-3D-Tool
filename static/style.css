@@ -437,6 +437,7 @@ input:checked + .slider:before {
 .guides-content {
     max-width: 1200px;
     text-align: left;
+    font-size: 0.8rem;
 }
 .guides-content h2 {
     text-align: center;

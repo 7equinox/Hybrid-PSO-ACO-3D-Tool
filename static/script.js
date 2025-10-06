@@ -296,7 +296,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (!g_str_currentSimulationId) return;
 
-        _fnShowLoader(`Simulation in progress… Please wait.`, { showSimCancel: true });
+        _fnShowLoader(`Simulation in progress… Please wait.`, { showSimCancel: false });
         try {
             const response = await fetch(`/simulation_status/${g_str_currentSimulationId}`);
             if (!response.ok) throw new Error(`Server status check failed: ${response.statusText}`);

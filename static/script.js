@@ -28,6 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let g_obj_simPollingInterval = null;       // Holds the interval timer for checking simulation status.
     let g_bln_loadCancellationRequested = false; // A flag for immediate UI feedback when data loading is cancelled.
     let g_bln_simCancellationRequested = false;  // A flag for immediate UI feedback when simulation is cancelled.
+    let g_obj_lastResults = null;              // Caches the full result object for visualization.
 
     // --- DOM ELEMENT REFERENCES ---
     // Caching references to frequently accessed DOM elements improves performance and code readability.
@@ -43,8 +44,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const obj_capacitySelect = document.getElementById("vehicle-capacity-select");
     const obj_initialTableBody = document.getElementById('initial-item-table-body');
     const obj_dynamicConstraintToggle = document.getElementById('dynamic-constraint-toggle');
+    const obj_visualizeBtn = document.getElementById('visualize-btn'); 
     
-    // --- NEW: DOM elements for the Guides Modal ---
+    // --- DOM elements for the Guides Modal ---
     const obj_guidesModal = document.getElementById("guidesModal");
     const obj_openGuidesBtn = document.getElementById("openGuidesBtn");
     const obj_closeGuidesBtn = document.getElementById("closeGuidesBtn");
@@ -91,14 +93,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- EVENT LISTENERS ---
     // Binds user actions (clicks, selections) to their corresponding handler functions.
 
-    // Listeners for the main Simulation Settings Modal
     obj_openModalBtn.onclick = () => { obj_modal.style.display = "flex"; };
     obj_closeModalBtn.onclick = () => { obj_modal.style.display = "none"; };
-    
-    // Listeners for the NEW Guides Modal
     obj_openGuidesBtn.onclick = () => { obj_guidesModal.style.display = "flex"; };
     obj_closeGuidesBtn.onclick = () => { obj_guidesModal.style.display = "none"; };
     obj_gotItBtn.onclick = () => { obj_guidesModal.style.display = "none"; };
+    obj_visualizeBtn.addEventListener('click', () => { _fnOpenVisualizationWindow(); });
 
     window.onclick = (e) => { 
         if (e.target === obj_modal) { obj_modal.style.display = "none"; }
@@ -129,13 +129,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- ASYNCHRONOUS LOGIC FUNCTIONS ---
 
-    /**
-     * Initiates the data loading process on the backend for a selected vehicle capacity.
-     * This function does NOT wait for completion; it starts the job and begins polling for status.
-     * @param {string} strCapacity The selected vehicle capacity.
-     */
     async function _fnStartLoadingDisplayData(strCapacity) {
-        g_bln_loadCancellationRequested = false; // Reset cancellation flag for the new job.
+        g_bln_loadCancellationRequested = false; 
         obj_runSimBtn.disabled = true;
         _fnResetInitialUI();
         _fnShowLoader("Starting data load...", { showLoadCancel: true, loadCancelDisabled: true });
@@ -148,8 +143,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const data = await response.json();
             if (data.status === 'started') {
                 g_str_currentLoadId = data.load_id;
-                obj_cancelLoadBtn.disabled = false; // Enable cancel button now that we have an ID.
-                g_obj_loadPollingInterval = setInterval(_fnCheckLoadStatus, 1500); // Start polling.
+                obj_cancelLoadBtn.disabled = false;
+                g_obj_loadPollingInterval = setInterval(_fnCheckLoadStatus, 1500);
             } else {
                 throw new Error("Failed to start data loading on the server.");
             }
@@ -160,17 +155,11 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    /**
-     * Periodically polls the backend to check the status of the ongoing data loading job.
-     * It handles 'completed', 'error', and 'cancelled' states.
-     */
     async function _fnCheckLoadStatus() {
-        // If user clicked "Cancel", immediately stop sending polling requests.
-        if (g_bln_loadCancellationRequested) {
+        if (g_bln_loadCancellationRequested || !g_str_currentLoadId) {
             clearInterval(g_obj_loadPollingInterval);
             return;
         }
-        if (!g_str_currentLoadId) return;
 
         _fnShowLoader(`Loading sample route data...`, { showLoadCancel: true });
         
@@ -179,18 +168,16 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!response.ok) throw new Error(`Server status check failed: ${response.statusText}`);
             const data = await response.json();
             
-            // Handle the final "completed" state.
             if (data.status === 'completed') {
-                clearInterval(g_obj_loadPollingInterval); // Stop polling.
+                clearInterval(g_obj_loadPollingInterval); 
                 const result = data.result;
-                // Populate the UI with the loaded data.
                 document.getElementById('initial-vehicle-volume').textContent = _fnFormatNumber(result.vehicle.capacity_cm3);
                 if (result.packages && result.packages.length > 0) {
                     _fnAppendPackagesToTable(result.packages);
-                    g_arr_allLoadedPackages = result.packages; // Cache the data.
+                    g_arr_allLoadedPackages = result.packages;
                     _fnUpdateInitialSummary(result.vehicle.total_package_volume, result.packages.length, result.vehicle.total_service_time);
                 }
-                obj_runSimBtn.disabled = false; // Enable the simulate button.
+                obj_runSimBtn.disabled = false;
                 _fnHideLoader();
             } else if (data.status === 'error') {
                 clearInterval(g_obj_loadPollingInterval);
@@ -198,13 +185,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 _fnResetInitialUI();
                 _fnHideLoader();
             } else if (data.status === 'cancelled') {
-                 // The backend confirmed the cancellation.
                  clearInterval(g_obj_loadPollingInterval);
                  _fnResetInitialUI();
                  obj_runSimBtn.disabled = true;
                  _fnHideLoader();
             }
-            // If status is 'running', this function will simply exit and be called again on the next interval.
         } catch (error) {
              console.error("Polling error:", error);
              clearInterval(g_obj_loadPollingInterval);
@@ -214,22 +199,14 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    /**
-     * Sends a cancellation request to the backend for the current data loading job.
-     */
     async function _fnCancelDataLoading() {
         if (!g_str_currentLoadId) return;
-        
-        // 1. Set the local flag for immediate UI feedback.
         g_bln_loadCancellationRequested = true;
         obj_cancelLoadBtn.disabled = true;
         _fnShowLoader('Cancellation requested. Terminating process… Please wait.', { showLoadCancel: false });
         
         try {
-            // 2. Send the non-blocking cancellation request to the backend.
             fetch(`/cancel_data_loading/${g_str_currentLoadId}`, { method: 'POST' });
-            
-            // 3. Stop the main poller and start a "cleanup" poller to wait for the final status.
             clearInterval(g_obj_loadPollingInterval);
             const cleanupInterval = setInterval(async () => {
                 const response = await fetch(`/data_loading_status/${g_str_currentLoadId}`);
@@ -247,9 +224,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    /**
-     * Initiates the simulation process on the backend.
-     */
     async function _fnStartSimulation() {
         g_bln_simCancellationRequested = false;
         if (!g_str_selectedCapacity || g_arr_allLoadedPackages.length === 0) {
@@ -257,7 +231,6 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
         
-        // Read the state of the new toggle switch.
         const bln_isDynamicConstraintEnabled = obj_dynamicConstraintToggle.checked;
         
         obj_modal.style.display = "none";
@@ -270,14 +243,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: JSON.stringify({ 
                     algorithm: g_str_selectedAlgorithm, 
                     capacity: g_str_selectedCapacity,
-                    dynamic_constraint_enabled: bln_isDynamicConstraintEnabled // Send toggle state to backend
+                    dynamic_constraint_enabled: bln_isDynamicConstraintEnabled
                 }),
             });
             const data = await response.json();
             if (data.status === 'started') {
                 g_str_currentSimulationId = data.simulation_id;
                 obj_cancelSimBtn.disabled = false;
-                g_obj_simPollingInterval = setInterval(_fnCheckSimulationStatus, 2000); // Start polling.
+                g_obj_simPollingInterval = setInterval(_fnCheckSimulationStatus, 2000);
             } else { throw new Error("Failed to start simulation on the server."); }
         } catch (error) {
             console.error("Error starting simulation:", error);
@@ -287,25 +260,37 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     /**
-     * Periodically polls the backend to check the status of the ongoing simulation job.
+     * Periodically polls the backend to check the status and progress of the simulation job.
      */
     async function _fnCheckSimulationStatus() {
-        if (g_bln_simCancellationRequested) {
+        if (g_bln_simCancellationRequested || !g_str_currentSimulationId) {
             clearInterval(g_obj_simPollingInterval);
             return;
         }
-        if (!g_str_currentSimulationId) return;
 
-        _fnShowLoader(`Simulation in progress… Please wait.`, { showSimCancel: false });
         try {
             const response = await fetch(`/simulation_status/${g_str_currentSimulationId}`);
             if (!response.ok) throw new Error(`Server status check failed: ${response.statusText}`);
             const data = await response.json();
+
+            if (data.status === 'running' && data.progress) {
+                const progress = data.progress;
+                if (progress.total > 0) {
+                    _fnShowLoader(
+                        `Optimizing... (Generation ${progress.current} / ${progress.total})`, 
+                        { showSimCancel: false }
+                    );
+                } else {
+                     _fnShowLoader(
+                        progress.message || 'Simulation in progress...', 
+                        { showSimCancel: true }
+                     );
+                }
+            }
             
-            // Handle final states.
             if (data.status === 'completed') {
                 clearInterval(g_obj_simPollingInterval);
-                _fnUpdateResultsUI(data.result); // Populate the results panel.
+                _fnUpdateResultsUI(data.result);
                 _fnHideLoader();
             } else if (data.status === 'error') {
                 clearInterval(g_obj_simPollingInterval);
@@ -315,7 +300,6 @@ document.addEventListener("DOMContentLoaded", () => {
                  clearInterval(g_obj_simPollingInterval);
                  _fnHideLoader();
             }
-             // If status is 'running', do nothing and wait for the next interval.
         } catch (error) {
              console.error("Polling error:", error);
              clearInterval(g_obj_simPollingInterval);
@@ -324,9 +308,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
     
-    /**
-     * Sends a cancellation request to the backend for the current simulation job.
-     */
     async function _fnCancelSimulation() {
         if (!g_str_currentSimulationId) return;
         g_bln_simCancellationRequested = true;
@@ -335,7 +316,6 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             fetch(`/cancel_simulation/${g_str_currentSimulationId}`, { method: 'POST' });
             
-            // Start cleanup poller.
             clearInterval(g_obj_simPollingInterval);
             const cleanupInterval = setInterval(async () => {
                  const response = await fetch(`/simulation_status/${g_str_currentSimulationId}`);
@@ -354,11 +334,6 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // --- UI HELPER FUNCTIONS ---
     
-    /**
-     * Displays the loading spinner modal with a custom message and button configuration.
-     * @param {string} strMessage - The message to display.
-     * @param {object} options - Configuration for displaying cancel buttons.
-     */
     function _fnShowLoader(strMessage = "Processing...", options = {}) {
         obj_loader.querySelector('p').textContent = strMessage;
         obj_cancelLoadBtn.style.display = options.showLoadCancel ? 'block' : 'none';
@@ -368,14 +343,12 @@ document.addEventListener("DOMContentLoaded", () => {
         obj_loader.style.display = 'flex';
     }
 
-    /** Hides the loading spinner modal. */
     function _fnHideLoader() {
         obj_cancelLoadBtn.style.display = 'none';
         obj_cancelSimBtn.style.display = 'none';
         obj_loader.style.display = 'none';
     }
 
-    /** Clears all displayed data from the initial data panel (left side). */
     function _fnResetInitialUI() {
         obj_initialTableBody.innerHTML = '';
         g_arr_allLoadedPackages = [];
@@ -386,22 +359,12 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById('initial-no-item').style.display = 'block';
     }
 
-    /**
-     * Updates the summary cards in the initial data panel.
-     * @param {number} fltVolume - Total package volume.
-     * @param {number} intCount - Total number of packages.
-     * @param {number} fltServiceTime - Total service time.
-     */
     function _fnUpdateInitialSummary(fltVolume, intCount, fltServiceTime) {
         document.getElementById('initial-product-volume').textContent = _fnFormatNumber(Math.round(fltVolume));
         document.getElementById('initial-product-count').textContent = _fnFormatNumber(intCount);
         document.getElementById('initial-service-time').textContent = _fnFormatNumber(Math.round(fltServiceTime));
     }
 
-    /**
-     * Populates the initial items table with package data.
-     * @param {Array<object>} arrPackages - An array of package objects.
-     */
     function _fnAppendPackagesToTable(arrPackages) {
         if (arrPackages && arrPackages.length > 0) {
             document.getElementById('initial-no-item').style.display = 'none';
@@ -409,11 +372,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    /**
-     * Creates the HTML string for a single table row.
-     * @param {object} objPkg - A single package object.
-     * @returns {string} The HTML `<tr>` string.
-     */
     function _fnCreateTableRow(objPkg) {
         return `
             <tr>
@@ -426,28 +384,20 @@ document.addEventListener("DOMContentLoaded", () => {
             </tr>`;
     }
 
-    /**
-     * Formats a number with commas for thousands separation.
-     * @param {number} numValue - The number to format.
-     * @returns {string} The formatted number string.
-     */
     function _fnFormatNumber(numValue) {
         return numValue ? numValue.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") : '0';
     }
 
-    /**
-     * Populates the entire results panel (right side) with the data from a completed simulation.
-     * @param {object} objResults - The full results object from the backend.
-     */
     function _fnUpdateResultsUI(objResults) {
-        // Update result summary cards
+        g_obj_lastResults = objResults;
+        obj_visualizeBtn.style.display = 'none'; 
+
         document.getElementById('result-algorithm-name').textContent = objResults.algorithm_name;
         document.getElementById('result-vehicle-volume').textContent = _fnFormatNumber(objResults.vehicle_info.capacity_cm3);
         document.getElementById('result-product-volume').textContent = _fnFormatNumber(objResults.vehicle_info.total_packed_volume);
         document.getElementById('result-product-count').textContent = objResults.vehicle_info.num_packages_loaded;
         document.getElementById('result-service-time').textContent = _fnFormatNumber(objResults.vehicle_info.total_packed_service_time);
 
-        // Update all performance metrics from the results
         const { metrics } = objResults;
         document.getElementById('metric-exec-time').textContent = metrics.computation_time;
         document.getElementById('metric-mem-usage').textContent = metrics.memory_usage_mb;
@@ -456,15 +406,185 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById('metric-feasibility').textContent = metrics.unloading_feasibility;
         document.getElementById('metric-seq-len').textContent = metrics.unloading_sequence_length;
 
-        // Update the packed items table
         const tableBody = document.getElementById('result-item-table-body');
         const noItemText = document.getElementById('result-no-item');
-        tableBody.innerHTML = ''; // Clear previous results
+        tableBody.innerHTML = ''; 
         if (objResults.packed_items && objResults.packed_items.length > 0) {
             noItemText.style.display = 'none';
             tableBody.innerHTML = objResults.packed_items.map(_fnCreateTableRow).join('');
+            obj_visualizeBtn.style.display = 'inline-flex';
         } else {
             noItemText.style.display = 'block';
         }
+    }
+
+    /**
+     * REVISED: Now includes full interactivity with raycasting for object picking,
+     * highlighting of selected items, and a dynamic info panel to display data.
+     */
+    function _fnOpenVisualizationWindow() {
+        if (!g_obj_lastResults) {
+            alert("No simulation data available to visualize.");
+            return;
+        }
+
+        const { vehicle_info, packed_items } = g_obj_lastResults;
+        
+        const htmlContent = `
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <title>3D Packing Visualization</title>
+                <style>
+                    body { margin: 0; overflow: hidden; font-family: sans-serif; }
+                    canvas { display: block; }
+                    /* NEW: CSS for the information panel. */
+                    #info-panel {
+                        position: absolute;
+                        top: 10px;
+                        left: 10px;
+                        padding: 10px;
+                        background: rgba(0, 0, 0, 0.7);
+                        color: white;
+                        border-radius: 5px;
+                        display: none; /* Hidden by default. */
+                        font-size: 14px;
+                        line-height: 1.5;
+                    }
+                    #info-panel strong { color: #e08128; }
+                </style>
+            </head>
+            <body>
+                <!-- NEW: HTML structure for the info panel. -->
+                <div id="info-panel"></div>
+
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>
+                <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"><\/script>
+                
+                <script>
+                    const scene = new THREE.Scene();
+                    scene.background = new THREE.Color(0x282c34);
+                    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 20000);
+                    const renderer = new THREE.WebGLRenderer({ antialias: true });
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                    document.body.appendChild(renderer.domElement);
+
+                    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+                    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                    scene.add(ambientLight);
+                    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                    directionalLight.position.set(200, 500, 300);
+                    scene.add(directionalLight);
+
+                    const containerGeom = new THREE.BoxGeometry(${vehicle_info.width}, ${vehicle_info.height}, ${vehicle_info.depth});
+                    const containerEdges = new THREE.EdgesGeometry(containerGeom);
+                    const containerLines = new THREE.LineSegments(containerEdges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 }));
+                    containerLines.position.set(${vehicle_info.width / 2}, ${vehicle_info.height / 2}, ${vehicle_info.depth / 2});
+                    scene.add(containerLines);
+                    
+                    const colorCache = {};
+                    function getRandomColor(id) {
+                        if (!colorCache[id]) {
+                            const letters = '89ABCDEF';
+                            let color = '#';
+                            for (let i = 0; i < 6; i++) {
+                                color += letters[Math.floor(Math.random() * 8)];
+                            }
+                            colorCache[id] = color;
+                        }
+                        return new THREE.Color(colorCache[id]);
+                    }
+
+                    // NEW: An array to hold the package meshes for raycasting.
+                    const packageMeshes = [];
+                    const packedItems = ${JSON.stringify(packed_items)};
+                    packedItems.forEach(item => {
+                        const itemGeom = new THREE.BoxGeometry(item.width, item.height, item.depth);
+                        const itemMaterial = new THREE.MeshLambertMaterial({ color: getRandomColor(item.id) });
+                        const itemMesh = new THREE.Mesh(itemGeom, itemMaterial);
+                        itemMesh.position.set(
+                            item.position_x + item.width / 2,
+                            item.position_y + item.height / 2,
+                            item.position_z + item.depth / 2
+                        );
+                        // NEW: Attach the full item data to the mesh object for later retrieval.
+                        itemMesh.userData = item;
+                        scene.add(itemMesh);
+                        packageMeshes.push(itemMesh);
+                    });
+
+                    const maxDim = Math.max(${vehicle_info.width}, ${vehicle_info.height}, ${vehicle_info.depth});
+                    camera.position.z = maxDim * 1.5;
+                    camera.position.x = maxDim * 0.8;
+                    camera.position.y = maxDim * 0.7;
+                    controls.target.set(containerLines.position.x, containerLines.position.y, containerLines.position.z);
+                    controls.update();
+
+                    // --- NEW: INTERACTIVITY LOGIC ---
+                    const raycaster = new THREE.Raycaster();
+                    const mouse = new THREE.Vector2();
+                    let selectedObject = null;
+                    const highlightMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFF00, transparent: true, opacity: 0.8 });
+
+                    window.addEventListener('click', (event) => {
+                        // Normalize mouse coordinates to [-1, 1] range.
+                        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                        mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+
+                        raycaster.setFromCamera(mouse, camera);
+                        const intersects = raycaster.intersectObjects(packageMeshes);
+
+                        // If a previous object was selected, restore its original material.
+                        if (selectedObject) {
+                            selectedObject.material = selectedObject.userData.originalMaterial;
+                            selectedObject = null;
+                        }
+                        
+                        document.getElementById('info-panel').style.display = 'none'; // Hide panel by default
+
+                        if (intersects.length > 0) {
+                            // The first object in the array is the closest one.
+                            const intersected = intersects[0].object;
+                            selectedObject = intersected;
+
+                            // Store original material and apply highlight.
+                            selectedObject.userData.originalMaterial = selectedObject.material;
+                            selectedObject.material = highlightMaterial;
+                            
+                            // Display the info.
+                            const data = intersected.userData;
+                            const infoDiv = document.getElementById('info-panel');
+                            infoDiv.style.display = 'block';
+                            infoDiv.innerHTML = \`
+                                <strong>Product ID:</strong> \${data.id}<br>
+                                <strong>Volume:</strong> \${Math.round(data.volume).toLocaleString()} cm³<br>
+                                <strong>Service Time:</strong> \${data.service_time} s<br>
+                                <strong>Dimensions (H×L×W):</strong> \${data.height}×\${data.depth}×\${data.width} cm
+                            \`;
+                        }
+                    });
+
+                    function animate() {
+                        requestAnimationFrame(animate);
+                        controls.update();
+                        renderer.render(scene, camera);
+                    }
+                    animate();
+                    
+                    window.addEventListener('resize', () => {
+                        camera.aspect = window.innerWidth / window.innerHeight;
+                        camera.updateProjectionMatrix();
+                        renderer.setSize(window.innerWidth, window.innerHeight);
+                    }, false);
+                <\/script>
+            </body>
+            </html>
+        `;
+        
+        const vizWindow = window.open("", "3D Visualization", "width=900,height=700");
+        vizWindow.document.open();
+        vizWindow.document.write(htmlContent);
+        vizWindow.document.close();
     }
 });

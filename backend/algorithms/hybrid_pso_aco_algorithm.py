@@ -25,13 +25,16 @@ from deap import base, tools
 from .base_algorithm import creator # Imports the shared Fitness and Particle structures.
 from backend.simulation.custom_exceptions import CancelledException
 
-def fn_runHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag,
+# NEW: The main function now accepts a progress tracker dictionary.
+def fn_runHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag, dictProgressTracker,
                                 intNumParticles=10, intMaxGenerations=10, fltEvaporationRate=0.2):
     """
     Executes the proposed Pheromone-Augmented Particle Swarm Optimization (PACO) algorithm,
     following the procedural flowchart (Figure 6) from the methodology.
     """
     int_numItems = len(arrItems)
+    dictProgressTracker['total'] = intMaxGenerations # NEW: Set the total number of generations for the UI.
+    
     arr_serviceTimes = np.array([p.get('service_time', 1) for p in arrPackagesInfo])
     arr_serviceTimes[arr_serviceTimes == 0] = 1
 
@@ -57,6 +60,7 @@ def fn_runHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution,
     # --- HYBRID OPTIMIZATION LOOP (The core cycle of Figure 6) ---
     try:
         for gen in range(intMaxGenerations):
+            dictProgressTracker['current'] = gen + 1 # NEW: Update the current generation number.
             if dictCancellationFlag['is_cancelled']: raise CancelledException()
             print(f"Hybrid PSO-ACO Generation: {gen + 1}/{intMaxGenerations}")
 
@@ -122,16 +126,18 @@ def _updateParticleHybrid(objParticle, objGbest, pheromone_matrix, service_times
     # These components function exactly as in the standalone PSO, pulling the
     # particle towards its personal best and the global best positions.
     arr_pbestSwaps = []
-    arr_pbestDiff = [i for i in range(int_numItems) if i < len(objParticle.pbest) and objParticle[i] != objParticle.pbest[i]]
-    if len(arr_pbestDiff) >= 2:
-        int_numSwaps = int(phi1 * random.random() * len(arr_pbestDiff) / 2)
-        arr_pbestSwaps.extend(tuple(random.sample(arr_pbestDiff, 2)) for _ in range(int_numSwaps))
+    if hasattr(objParticle, 'pbest') and objParticle.pbest:
+        arr_pbestDiff = [i for i in range(int_numItems) if i < len(objParticle.pbest) and objParticle[i] != objParticle.pbest[i]]
+        if len(arr_pbestDiff) >= 2:
+            int_numSwaps = int(phi1 * random.random() * len(arr_pbestDiff) / 2)
+            arr_pbestSwaps.extend(tuple(random.sample(arr_pbestDiff, 2)) for _ in range(int_numSwaps))
 
     arr_gbestSwaps = []
-    arr_gbestDiff = [i for i in range(int_numItems) if i < len(objGbest) and objParticle[i] != objGbest[i]]
-    if len(arr_gbestDiff) >= 2:
-        int_numSwaps = int(phi2 * random.random() * len(arr_gbestDiff) / 2)
-        arr_gbestSwaps.extend(tuple(random.sample(arr_gbestDiff, 2)) for _ in range(int_numSwaps))
+    if objGbest:
+        arr_gbestDiff = [i for i in range(int_numItems) if i < len(objGbest) and objParticle[i] != objGbest[i]]
+        if len(arr_gbestDiff) >= 2:
+            int_numSwaps = int(phi2 * random.random() * len(arr_gbestDiff) / 2)
+            arr_gbestSwaps.extend(tuple(random.sample(arr_gbestDiff, 2)) for _ in range(int_numSwaps))
 
     # --- PHEROMONE-GUIDED COMPONENT (The Core Hybridization Mechanism) ---
     # This is the key novelty of the hybrid algorithm. This component introduces
@@ -144,6 +150,7 @@ def _updateParticleHybrid(objParticle, objGbest, pheromone_matrix, service_times
     int_numPhSwaps = int(phi3 * random.random())
     for _ in range(int_numPhSwaps):
         # Choose a random position in the sequence to try and improve.
+        if int_numItems <= 1: continue
         int_posToImprove = random.randrange(int_numItems - 1)
         int_currentItemAtPos = objParticle[int_posToImprove]
         
@@ -165,6 +172,7 @@ def _updateParticleHybrid(objParticle, objGbest, pheromone_matrix, service_times
     arr_heuristicSwaps = []
     int_numHeuristicSwaps = int(phi4 * random.random())
     for _ in range(int_numHeuristicSwaps):
+        if int_numItems < 2: continue
         idx1, idx2 = random.sample(range(int_numItems), 2)
         if service_times[objParticle[idx1]] > service_times[objParticle[idx2]]:
              arr_heuristicSwaps.append(tuple(sorted((idx1, idx2))))

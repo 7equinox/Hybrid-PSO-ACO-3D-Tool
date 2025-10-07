@@ -22,7 +22,8 @@ from deap import base, tools
 from .base_algorithm import creator  # Imports the base Fitness and Particle definitions.
 from backend.simulation.custom_exceptions import CancelledException
 
-def fn_runPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag,
+# NEW: The main function now accepts a progress tracker dictionary.
+def fn_runPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag, dictProgressTracker,
                        intNumParticles=10, intMaxGenerations=10):
     """
     Executes the complete standalone Particle Swarm Optimization algorithm,
@@ -33,6 +34,7 @@ def fn_runPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCanc
         arrPackagesInfo (list): Metadata for the packages.
         funcEvaluateSolution (function): The fitness evaluation function.
         dictCancellationFlag (dict): A shared flag to check for user-initiated cancellation.
+        dictProgressTracker (dict): A shared dictionary to report progress to the frontend.
         intNumParticles (int): The size of the swarm (number of candidate solutions).
         intMaxGenerations (int): The number of iterations for the optimization loop.
 
@@ -40,6 +42,7 @@ def fn_runPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCanc
         tuple: The best solution found (a list of indices) and its fitness values.
     """
     int_numItems = len(arrItems)
+    dictProgressTracker['total'] = intMaxGenerations # NEW: Set the total number of generations for the UI.
 
     # Heuristic Information: Incorporates domain-specific knowledge to guide the
     # search more effectively than a purely random process. In this case, we
@@ -68,6 +71,7 @@ def fn_runPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCanc
     try:
         # The loop continues until a stopping condition is met (max generations reached).
         for gen in range(intMaxGenerations):
+            dictProgressTracker['current'] = gen + 1 # NEW: Update the current generation number.
             if dictCancellationFlag['is_cancelled']: raise CancelledException()
             print(f"PSO Generation: {gen + 1}/{intMaxGenerations}")
 
@@ -122,21 +126,23 @@ def _updateParticle(objParticle, objGbest, phi1, phi2, phi3, service_times):
     # personal best-known position. It represents the particle's individual "memory" or "experience".
     arr_pbestSwaps = []
     # Find the indices where the current position differs from the personal best.
-    arr_pbestDiff = [i for i in range(int_numItems) if i < len(objParticle.pbest) and objParticle[i] != objParticle.pbest[i]]
-    if len(arr_pbestDiff) >= 2:
-        # The number of swaps is proportional to the difference.
-        int_numSwaps = int(phi1 * random.random() * len(arr_pbestDiff) / 2)
-        arr_pbestSwaps.extend(tuple(random.sample(arr_pbestDiff, 2)) for _ in range(int_numSwaps))
+    if hasattr(objParticle, 'pbest') and objParticle.pbest:
+        arr_pbestDiff = [i for i in range(int_numItems) if i < len(objParticle.pbest) and objParticle[i] != objParticle.pbest[i]]
+        if len(arr_pbestDiff) >= 2:
+            # The number of swaps is proportional to the difference.
+            int_numSwaps = int(phi1 * random.random() * len(arr_pbestDiff) / 2)
+            arr_pbestSwaps.extend(tuple(random.sample(arr_pbestDiff, 2)) for _ in range(int_numSwaps))
 
     # --- Social Component (Influence of gBest) ---
     # This component generates swaps that pull the particle towards the swarm's
     # global best-known position. This represents the "social" or "collective intelligence" aspect of PSO.
     arr_gbestSwaps = []
     # Find the indices where the current position differs from the global best.
-    arr_gbestDiff = [i for i in range(int_numItems) if i < len(objGbest) and objParticle[i] != objGbest[i]]
-    if len(arr_gbestDiff) >= 2:
-        int_numSwaps = int(phi2 * random.random() * len(arr_gbestDiff) / 2)
-        arr_gbestSwaps.extend(tuple(random.sample(arr_gbestDiff, 2)) for _ in range(int_numSwaps))
+    if objGbest:
+        arr_gbestDiff = [i for i in range(int_numItems) if i < len(objGbest) and objParticle[i] != objGbest[i]]
+        if len(arr_gbestDiff) >= 2:
+            int_numSwaps = int(phi2 * random.random() * len(arr_gbestDiff) / 2)
+            arr_gbestSwaps.extend(tuple(random.sample(arr_gbestDiff, 2)) for _ in range(int_numSwaps))
 
     # --- Heuristic Component (Domain Knowledge) ---
     # An additional velocity component based on domain-specific knowledge. This

@@ -21,7 +21,8 @@ import random
 import numpy as np
 from backend.simulation.custom_exceptions import CancelledException
 
-def fn_runAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag,
+# NEW: The main function now accepts a progress tracker dictionary.
+def fn_runAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag, dictProgressTracker,
                        intNumAnts=10, intMaxGenerations=10,
                        fltAlpha=1.0, fltBeta=2.0, fltEvaporationRate=0.5):
     """
@@ -33,6 +34,7 @@ def fn_runAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCanc
         arrPackagesInfo (list): Metadata for the packages, used for heuristics.
         funcEvaluateSolution (function): The shared fitness evaluation function.
         dictCancellationFlag (dict): A shared flag to check for user-initiated cancellation.
+        dictProgressTracker (dict): A shared dictionary to report progress to the frontend.
         intNumAnts (int): The number of ants in the colony for each generation.
         intMaxGenerations (int): The number of iterations for the optimization loop.
         fltAlpha (float): The influence factor for the pheromone trail.
@@ -43,6 +45,7 @@ def fn_runAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCanc
         tuple: The best solution found (a list of indices) and its fitness values.
     """
     int_numItems = len(arrItems)
+    dictProgressTracker['total'] = intMaxGenerations # NEW: Set the total number of generations for the UI.
 
     # Heuristic Information: Provides a local "desirability" measure for ants
     # when choosing their next step. As with PSO, we use service time as a heuristic
@@ -64,6 +67,7 @@ def fn_runAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCanc
     # --- ITERATIVE OPTIMIZATION LOOP (The core cycle of the ACO Flowchart) ---
     try:
         for gen in range(intMaxGenerations):
+            dictProgressTracker['current'] = gen + 1 # NEW: Update the current generation number.
             if dictCancellationFlag['is_cancelled']: raise CancelledException()
             print(f"ACO Generation: {gen + 1}/{intMaxGenerations}")
 

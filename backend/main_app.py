@@ -57,16 +57,18 @@ def _executeSimulationInThread(strSimulationId, strAlgorithmName, fltCapacityCm3
     global g_dict_runningSimulations
 
     try:
-        # Retrieve the shared cancellation flag. The algorithm inside the thread will
-        # periodically check this flag to see if the user has requested to stop the process.
+        # Retrieve the shared dictionaries for cancellation and progress tracking.
         dict_cancellationFlag = g_dict_runningSimulations[strSimulationId]['cancellation_flag']
+        dict_progressTracker = g_dict_runningSimulations[strSimulationId]['progress'] # NEW: Get progress tracker.
 
         # Delegate the complex logic of the simulation to the orchestrator module.
+        # NEW: The progress tracker is passed down to the simulation core.
         dict_results = fn_orchestrateSimulationRun(
             strAlgorithmName, 
             fltCapacityCm3, 
             dict_cancellationFlag, 
-            blnIsDynamicConstraintEnabled
+            blnIsDynamicConstraintEnabled,
+            dict_progressTracker 
         )
 
         # Use a lock to safely update the shared global dictionary with the results.
@@ -233,6 +235,10 @@ def handleStartSimulationRequest():
     flt_capacityCm3 = float(obj_data.get('capacity'))
     bln_isDynamicConstraintEnabled = obj_data.get('dynamic_constraint_enabled', True) # Default to True if not provided
     str_simulationId = str(uuid.uuid4())
+    
+    # NEW: Create a mutable dictionary to track real-time progress.
+    # This dictionary is passed by reference into the simulation thread.
+    dict_progressTracker = {'current': 0, 'total': 0, 'message': 'Initializing...'}
 
     dict_cancellationFlag = {'is_cancelled': False}
     obj_thread = Thread(
@@ -245,7 +251,8 @@ def handleStartSimulationRequest():
             'thread': obj_thread,
             'status': 'running',
             'result': None,
-            'cancellation_flag': dict_cancellationFlag
+            'cancellation_flag': dict_cancellationFlag,
+            'progress': dict_progressTracker # NEW: Add the progress tracker to the job entry.
         }
 
     obj_thread.start()
@@ -256,7 +263,7 @@ def handleStartSimulationRequest():
 @g_obj_flaskApp.route('/simulation_status/<string:strSimulationId>')
 def handleSimulationStatusRequest(strSimulationId):
     """
-    API endpoint that allows the client to poll for the status of a running simulation.
+    API endpoint that allows the client to poll for the status and progress of a running simulation.
     """
     with g_obj_simulationLock:
         dict_sim = g_dict_runningSimulations.get(strSimulationId)
@@ -264,7 +271,12 @@ def handleSimulationStatusRequest(strSimulationId):
             return jsonify({'status': 'not_found'}), 404
         # The job entry is not deleted on completion to prevent a race condition
         # where the client polls just as the job finishes but before it can get the result.
-        return jsonify({'status': dict_sim['status'], 'result': dict_sim['result']})
+        # NEW: The 'progress' dictionary is now included in the response payload.
+        return jsonify({
+            'status': dict_sim['status'], 
+            'result': dict_sim['result'],
+            'progress': dict_sim.get('progress', {}) # Use .get for safety.
+        })
 
 
 @g_obj_flaskApp.route('/cancel_simulation/<string:strSimulationId>', methods=['POST'])
@@ -273,7 +285,6 @@ def handleCancelSimulationRequest(strSimulationId):
     API endpoint to request the cancellation of a running simulation by setting
     the shared cancellation flag to True.
     """
-
     with g_obj_simulationLock:
         dict_sim = g_dict_runningSimulations.get(strSimulationId)
         if dict_sim and dict_sim['status'] == 'running':

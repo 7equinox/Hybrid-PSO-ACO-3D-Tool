@@ -18,6 +18,8 @@ This software is engineered to bridge this critical gap by providing the means t
 
 *   **Simulating Real-World Disruptions:** A key feature is the ability to toggle a **Dynamic Constraint**. When activated, this feature mimics real-world uncertainty by removing 10-20% of packages just before optimization begins, testing the adaptability and robustness of each algorithm against unforeseen changes—a common challenge in logistics.
 
+*   **NEW — Intuitive Result Visualization:** To make the complex, three-dimensional output of the algorithms understandable, the tool now includes an **interactive 3D visualization** of the final packed vehicle. This feature allows users to intuitively grasp why a certain packing arrangement resulted in a high or low relocation count, transforming abstract metrics into a tangible and explorable model.
+
 ---
 
 ## 2. System Architecture and Performance Strategy (Chapter 3)
@@ -94,9 +96,30 @@ Open a web browser and navigate to `http://127.0.0.1:5000`.
 
 ### How to Use the Tool:
 
-1.  Launch the configuration modal by clicking the **"Modify Simulation"** gear icon.
-2.  Select your desired **Optimization Algorithm** (PSO, ACO, or PSO-ACO).
-3.  Choose a **Vehicle Volume Capacity** from the dropdown menu. The application will then load a sample route and its associated data.
-4.  **Configure the Dynamic Constraint.** Use the toggle switch to enable or disable the simulation of real-world disruptions.
-5.  Press the **"Simulate"** button to initiate the experiment. A loader will indicate that the process is running.
-6.  Upon completion, the right-hand panel will populate with the comprehensive results, detailing all scalability and operational efficiency metrics for the selected algorithm.
+The application interface is divided into a left panel (Initial Dataset) and a right panel (Simulation Results). The following steps guide a typical experimental workflow:
+
+1.  **Open Simulation Settings:**
+    *   Begin by clicking the **"Modify Simulation"** gear icon at the top right of the screen. This will open the main configuration modal.
+
+2.  **Select an Algorithm:**
+    *   Choose one of the three optimization algorithms to test: **PSO**, **ACO**, or the hybrid **PSO-ACO**.
+
+3.  **Choose a Vehicle:**
+    *   Select a **Vehicle Volume Capacity** from the dropdown menu. The application will immediately contact the server to load a valid, sample set of packages corresponding to that vehicle size.
+    *   Once loaded, the left panel will populate with the initial vehicle and package data.
+
+4.  **Configure the Dynamic Constraint:**
+    *   Use the toggle switch to **enable or disable** the dynamic constraint. When enabled, the simulation mimics a real-world disruption by randomly removing 10-20% of packages before optimization, forcing the algorithm to adapt.
+
+5.  **Run the Simulation:**
+    *   Press the **"Simulate"** button to begin the experiment. A loading indicator will appear.
+    *   **NEW:** The loader will now display real-time feedback from the backend, showing the current **generation number** of the running algorithm (e.g., "Generation 5 / 10"). This provides a clear indication of progress during longer simulations.
+    *   You may cancel the process at any time using the "Cancel Simulation" button.
+
+6.  **Analyze the Results:**
+    *   Upon completion, the right-hand panel will display the comprehensive outcome. This includes the final loaded vehicle statistics and a full breakdown of key performance metrics (Execution Time, Memory Usage, Volume Utilization, Relocation Count, etc.).
+
+7.  **NEW — Visualize the Solution:**
+    *   If the simulation produces a valid packing solution, a **"Visualize Packing"** button will appear next to the "Loading/Unloading Metrics" title.
+    *   Clicking this button will launch a new window containing a fully interactive 3D model of the packed vehicle. You can **rotate, pan, and zoom** to inspect the layout.
+    *   **Click on any package** within the 3D model to highlight it and display its detailed information (Product ID, Volume, Service Time, and Dimensions) in a convenient info panel.

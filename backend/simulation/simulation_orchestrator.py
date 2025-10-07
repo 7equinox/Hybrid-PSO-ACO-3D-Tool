@@ -31,7 +31,8 @@ from backend.algorithms.pso_algorithm import fn_runPsoAlgorithm
 from backend.algorithms.aco_algorithm import fn_runAcoAlgorithm
 from backend.algorithms.hybrid_pso_aco_algorithm import fn_runHybridPsoAcoAlgorithm
 
-def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled):
+# NEW: The orchestrator's main function now accepts a progress tracker dictionary.
+def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled, dictProgressTracker):
     """
     This is the main function for a single experimental run. It orchestrates
     the entire process from data loading to algorithm execution and result
@@ -40,6 +41,7 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
     if dictCancellationFlag['is_cancelled']:
         raise CancelledException()
 
+    dictProgressTracker['message'] = "Loading dataset..."
     print("Simulation started: Loading full dataset for the given capacity...")
     # Fetch the complete dataset associated with the selected vehicle capacity.
     dict_vehicleInfo, arr_packagesInfo = fn_getSimulationDataForVehicle(fltCapacityCm3, dictCancellationFlag)
@@ -56,6 +58,7 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
     # 'Volume-Constrained Stratified Random Sampling' method. This creates smaller,
     # yet representative and solvable, problem instances, enabling a fair benchmark
     # across all algorithms without compromising the integrity of the data.
+    dictProgressTracker['message'] = "Sampling data..."
     MAX_SAMPLE_SIZE = 400 # A hard limit to prevent out-of-memory errors.
     if len(arr_packagesInfo) > MAX_SAMPLE_SIZE:
         print(f"Original dataset has {len(arr_packagesInfo)} items. Applying sampling to reduce to {MAX_SAMPLE_SIZE}.")
@@ -110,6 +113,7 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
     # To test the algorithms' adaptability to real-world disruptions (like last-minute
     # order changes), a random subset (10-20%) of items is removed from the problem
     # instance just before optimization begins. This is now controlled by a toggle on the frontend.
+    dictProgressTracker['message'] = "Applying constraints..."
     if blnIsDynamicConstraintEnabled:
         print("Dynamic constraint is ENABLED. Removing 10-20% of items from the problem.")
         if len(arr_packagesInfo) > 1:
@@ -210,10 +214,12 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
     # The `memory_profiler` library is used to measure the peak RAM usage, and `time`
     # is used to measure the total execution time. These two metrics are crucial for
     # evaluating the scalability of each algorithm.
+    dictProgressTracker['message'] = "Running optimization..."
     tm_startTime = time.time()
     # The memory_usage function wraps the algorithm call to monitor its resource consumption.
+    # NEW: The progress tracker is now passed to the selected algorithm function.
     flt_memUsage, (arr_bestSolutionIndices, tpl_bestFitness) = memory_usage(
-        (func_algorithm, (arr_itemsToPack, arr_packagesToLoad, fn_evaluateSolution, dictCancellationFlag)),
+        (func_algorithm, (arr_itemsToPack, arr_packagesToLoad, fn_evaluateSolution, dictCancellationFlag, dictProgressTracker)),
         retval=True, max_usage=True, interval=0.1
     )
     flt_computationTime = round(time.time() - tm_startTime, 2)
@@ -221,6 +227,7 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
     # --- POST-EXPERIMENTATION: DATA CONSOLIDATION ---
     # After the algorithm finishes, this section takes the best solution it found
     # and prepares a comprehensive result object to be sent back to the frontend for display.
+    dictProgressTracker['message'] = "Consolidating results..."
     obj_finalPacker = Packer()
     obj_finalPacker.add_bin(obj_bin)
     for int_i in arr_bestSolutionIndices:

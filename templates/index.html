@@ -20,26 +20,34 @@ ESTONILO, JULIUS EVAN C.
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- NEW: Title has been updated to the full, formal name of the tool. -->
-    <title>Hybrid PSO-ACO 3D Loading Optimization Tool</title>
+    <!-- Title updated to the official tool name. -->
+    <title>ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)</title>
     <!-- External Stylesheets -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <!-- NEW: Added the Three.js library for 3D visualization capabilities. -->
+    <!-- Three.js library for 3D visualization capabilities. -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
+
+    <!-- A new header section is created outside the main container -->
+    <!-- This places the title at the top of the entire page. -->
+    <header class="main-header">
+        <h1>ASPECT</h1>
+        <h2>Algorithm System for Packing Efficiency Comparison and Testing</h2>
+        <div id="openGuidesBtn" class="guides-btn">
+            <i class="fa-solid fa-book-open"></i>
+            <span>User Guide</span>
+        </div>
+    </header>
+
     <div class="container">
 
         <!-- =================================================================
         LEFT SECTION - Displays Initial Dataset Information
         ================================================================== -->
         <div class="left-section">
-            <div id="openGuidesBtn" class="guides-btn">
-                <i class="fa-solid fa-book-open"></i>
-                <p>User Guide</p>
-            </div>
-            <h1>2021 Amazon Last Mile Routing Research Challenge Dataset</h1>
+            <h2 class="dataset-title">2021 Amazon Last Mile Routing Research Challenge Dataset</h2>
             <div class="banners">
                 <div class="white-bg">
                     <p class="label">Vehicle Volume Capacity (cm³)</p>
@@ -59,24 +67,27 @@ ESTONILO, JULIUS EVAN C.
                 </div>
             </div>
 
-            <p class="label">Selected Items</p>
-            <div class="table white-bg">
-                <table class="custom-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 260px;">Product ID</th>
-                            <th style="width: 150px;">Volume (cm³)</th>
-                            <th style="width: 160px;">Service Time (s)</th>
-                            <th style="width: 130px;">Height (cm)</th>
-                            <th style="width: 140px;">Length (cm)</th>
-                            <th style="width: 130px;">Width (cm)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="initial-item-table-body">
-                        <!-- Rows will be dynamically inserted by JavaScript -->
-                    </tbody>
-                </table>
-                <p id="initial-no-item" class="no-item">SELECT VEHICLE</p>
+            <!-- MODIFIED: Wrapped this section in a .content-block div for consistent spacing. -->
+            <div class="content-block">
+                <p class="label">Selected Items</p>
+                <div class="table white-bg">
+                    <table class="custom-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 260px;">Product ID</th>
+                                <th style="width: 150px;">Volume (cm³)</th>
+                                <th style="width: 160px;">Service Time (s)</th>
+                                <th style="width: 130px;">Height (cm)</th>
+                                <th style="width: 140px;">Length (cm)</th>
+                                <th style="width: 130px;">Width (cm)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="initial-item-table-body">
+                            <!-- Rows will be dynamically inserted by JavaScript -->
+                        </tbody>
+                    </table>
+                    <p id="initial-no-item" class="no-item">SELECT VEHICLE</p>
+                </div>
             </div>
         </div> <!-- End of left-section -->
 
@@ -84,95 +95,105 @@ ESTONILO, JULIUS EVAN C.
         RIGHT SECTION - Displays Simulation Results and Metrics
         ================================================================== -->
         <div class="right-section">
+
+            <!-- The "Modify Simulation" button is positioned by CSS in the corner -->
             <div id="openModalBtn" class="settings">
                 <i class="fa-solid fa-gear"></i>
                 <p>Modify Simulation</p>
             </div>
+            
+            <div class="results-panel-content">
+                <!-- This header contains the algorithm and visualize button -->
+                <div class="algorithm-header">
+                    <div class="algorithm-title-group">
+                        <p class="label">Algorithm</p>
+                        <h2 id="result-algorithm-name">*Algorithm Name*</h2>
+                    </div>
+                    <button id="visualize-btn">
+                        <i class="fa-solid fa-cube"></i> Visualize Packing
+                    </button>
+                </div>
 
-            <p class="label">Algorithm</p>
-            <h1 id="result-algorithm-name" style="text-align: left;">*Algorithm Name*</h1>
-            <div class="banners">
-                <div class="gray-bg">
-                    <p class="label">Vehicle Volume Capacity (cm³)</p>
-                    <h2 id="result-vehicle-volume">0</h2>
-                </div>
-                <div class="gray-bg">
-                    <p class="label">Total Product Volume (cm³)</p>
-                    <h2 id="result-product-volume">0</h2>
-                </div>
-                <div class="gray-bg">
-                    <p class="label">Number of Products Loaded</p>
-                    <h2 id="result-product-count">0</h2>
-                </div>
-                <div class="gray-bg">
-                    <p class="label">Total Product Service Time (s)</p>
-                    <h2 id="result-service-time">0</h2>
-                </div>
-            </div>
-
-            <div class="metrics">
-                <div>
-                    <p class="label">Scalability Metrics</p>
-                    <div class="metric-info gray-bg">
-                        <div class="metric-item">
-                            <p class="label">Execution Time (s)</p>
-                            <h3 id="metric-exec-time">0</h3>
-                        </div>
-                        <div class="metric-item">
-                            <p class="label">Memory Usage (MB)</p>
-                            <h3 id="metric-mem-usage">0</h3>
-                        </div>
+                <div class="banners">
+                    <div class="gray-bg">
+                        <p class="label">Vehicle Volume Capacity (cm³)</p>
+                        <h2 id="result-vehicle-volume">0</h2>
+                    </div>
+                    <div class="gray-bg">
+                        <p class="label">Total Product Volume (cm³)</p>
+                        <h2 id="result-product-volume">0</h2>
+                    </div>
+                    <div class="gray-bg">
+                        <p class="label">Number of Products Loaded</p>
+                        <h2 id="result-product-count">0</h2>
+                    </div>
+                    <div class="gray-bg">
+                        <p class="label">Total Product Service Time (s)</p>
+                        <h2 id="result-service-time">0</h2>
                     </div>
                 </div>
-                <div style="margin: 20px 0;">
-                    <!-- NEW: This header is now a flex container to hold the button. -->
-                    <div class="metrics-header">
+
+                <div class="metrics">
+                    <!-- MODIFIED: Wrapped each metrics section for consistent spacing. -->
+                    <div class="content-block">
+                        <p class="label">Scalability Metrics</p>
+                        <div class="metric-info gray-bg">
+                            <div class="metric-item">
+                                <p class="label">Execution Time (s)</p>
+                                <h3 id="metric-exec-time">0</h3>
+                            </div>
+                            <div class="metric-item">
+                                <p class="label">Memory Usage (MB)</p>
+                                <h3 id="metric-mem-usage">0</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="content-block">
                         <p class="label">Loading/Unloading Metrics</p>
-                        <!-- NEW: Button to trigger the 3D visualization. It's hidden by default. -->
-                        <button id="visualize-btn">
-                            <i class="fa-solid fa-cube"></i> Visualize Packing
-                        </button>
-                    </div>
-                    <div class="metric-info gray-bg">
-                        <div class="metric-item">
-                            <p class="label">Volume Utilization (%)</p>
-                            <h3 id="metric-vol-util">0</h3>
-                        </div>
-                        <div class="metric-item">
-                            <p class="label">Relocation Count</p>
-                            <h3 id="metric-reloc-count">0</h3>
-                        </div>
-                        <div class="metric-item">
-                            <p class="label">Unloading Feasibility</p>
-                            <h3 id="metric-feasibility">N/A</h3>
-                        </div>
-                        <div class="metric-item">
-                            <p class="label">Unloading Sequence Length</p>
-                            <h3 id="metric-seq-len">0</h3>
+                        <div class="metric-info gray-bg">
+                            <div class="metric-item">
+                                <p class="label">Volume Utilization (%)</p>
+                                <h3 id="metric-vol-util">0</h3>
+                            </div>
+                            <div class="metric-item">
+                                <p class="label">Relocation Count</p>
+                                <h3 id="metric-reloc-count">0</h3>
+                            </div>
+                            <div class="metric-item">
+                                <p class="label">Unloading Feasibility</p>
+                                <h3 id="metric-feasibility">N/A</h3>
+                            </div>
+                            <div class="metric-item">
+                                <p class="label">Unloading Sequence Length</p>
+                                <h3 id="metric-seq-len">0</h3>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <p class="label">Packed Items</p>
-            <div class="table gray-bg">
-                <table class="custom-table gray-border">
-                    <thead>
-                        <tr>
-                            <th style="width: 260px;">Product ID</th>
-                            <th style="width: 150px;">Volume (cm³)</th>
-                            <th style="width: 160px;">Service Time (s)</th>
-                            <th style="width: 130px;">Height (cm)</th>
-                            <th style="width: 140px;">Length (cm)</th>
-                            <th style="width: 130px;">Width (cm)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="result-item-table-body">
-                        <!-- Rows will be dynamically inserted by JavaScript -->
-                    </tbody>
-                </table>
-                 <p id="result-no-item" class="no-item">NO RESULTS</p>
-            </div>
+                <!-- MODIFIED: Wrapped this final section for consistent spacing. -->
+                <div class="content-block">
+                    <p class="label">Packed Items</p>
+                    <div class="table gray-bg">
+                        <table class="custom-table gray-border">
+                            <thead>
+                                <tr>
+                                    <th style="width: 260px;">Product ID</th>
+                                    <th style="width: 150px;">Volume (cm³)</th>
+                                    <th style="width: 160px;">Service Time (s)</th>
+                                    <th style="width: 130px;">Height (cm)</th>
+                                    <th style="width: 140px;">Length (cm)</th>
+                                    <th style="width: 130px;">Width (cm)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="result-item-table-body">
+                                <!-- Rows will be dynamically inserted by JavaScript -->
+                            </tbody>
+                        </table>
+                        <p id="result-no-item" class="no-item">NO RESULTS</p>
+                    </div>
+                </div>
+            </div> <!-- End of results-panel-content -->
         </div> <!-- End of right-section -->
     </div> <!-- End of container -->
 
@@ -281,7 +302,7 @@ ESTONILO, JULIUS EVAN C.
 
     <!-- Main JavaScript File -->
     <script src="{{ url_for('static', filename='script.js') }}"></script>
-    <!-- NEW: OrbitControls is needed to make the 3D view interactive (zoom, rotate). -->
+    <!-- OrbitControls is needed to make the 3D view interactive (zoom, rotate). -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </body>
 </html>

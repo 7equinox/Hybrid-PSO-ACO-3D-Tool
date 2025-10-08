@@ -31,7 +31,7 @@ from backend.algorithms.pso_algorithm import fn_runPsoAlgorithm
 from backend.algorithms.aco_algorithm import fn_runAcoAlgorithm
 from backend.algorithms.hybrid_pso_aco_algorithm import fn_runHybridPsoAcoAlgorithm
 
-# NEW: The orchestrator's main function now accepts a progress tracker dictionary.
+# The orchestrator's main function now accepts a progress tracker dictionary.
 def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled, dictProgressTracker):
     """
     This is the main function for a single experimental run. It orchestrates
@@ -167,8 +167,10 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
         for int_i in arrItemOrderIndices:
             obj_packer.add_item(arr_itemsToPack[int_i])
         
-        # Run the underlying packing heuristic.
-        obj_packer.pack(bigger_first=False) 
+        # MODIFIED: A third crucial parameter is now included.
+        # 3. distribute_items=True: This enables the library's built-in item rotation
+        #    logic, allowing it to find much denser packing solutions.
+        obj_packer.pack(bigger_first=True, distribute_items=True, number_of_decimals=0) 
         
         arr_packedItems = obj_packer.bins[0].items
         if not arr_packedItems:
@@ -217,7 +219,7 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
     dictProgressTracker['message'] = "Running optimization..."
     tm_startTime = time.time()
     # The memory_usage function wraps the algorithm call to monitor its resource consumption.
-    # NEW: The progress tracker is now passed to the selected algorithm function.
+    # The progress tracker is now passed to the selected algorithm function.
     flt_memUsage, (arr_bestSolutionIndices, tpl_bestFitness) = memory_usage(
         (func_algorithm, (arr_itemsToPack, arr_packagesToLoad, fn_evaluateSolution, dictCancellationFlag, dictProgressTracker)),
         retval=True, max_usage=True, interval=0.1
@@ -230,9 +232,16 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
     dictProgressTracker['message'] = "Consolidating results..."
     obj_finalPacker = Packer()
     obj_finalPacker.add_bin(obj_bin)
+
+    # MODIFIED: The incorrect 'set_rotation_options' call has been removed.
+    # Rotation is now handled by the 'distribute_items' parameter in the pack() method.
     for int_i in arr_bestSolutionIndices:
         obj_finalPacker.add_item(arr_itemsToPack[int_i])
-    obj_finalPacker.pack(bigger_first=False)
+
+    obj_finalPacker.pack(bigger_first=True, distribute_items=True, number_of_decimals=0)
+    
+    # This function applies gravity and boundary checks for physical realism.
+    _postProcessPacking(obj_finalPacker.bins[0])
 
     arr_finalPackedItemsDetails = []
     flt_totalPackedVolume = 0
@@ -242,9 +251,17 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
     for obj_item in obj_finalPacker.bins[0].items:
         dict_originalPackage = next((p for p in arr_packagesToLoad if p['id'] == obj_item.name), None)
         if dict_originalPackage:
+            # After rotation, the item's dimensions may have changed.
+            # We must use the item's final, rotated dimensions for the visualization.
+            w, h, d = obj_item.get_dimension()
+            
+            # The positions from py3dbp are strings, convert them to floats for calculations.
             arr_pos = [float(p) for p in obj_item.position]
+            
             arr_finalPackedItemsDetails.append({
                 **dict_originalPackage,
+                # Store the final, rotated dimensions.
+                "width": w, "height": h, "depth": d,
                 "position_x": arr_pos[0], "position_y": arr_pos[1], "position_z": arr_pos[2]
             })
             flt_totalPackedVolume += dict_originalPackage['volume']
@@ -262,6 +279,8 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
             'unloading_sequence_length': tpl_bestFitness[2]
         },
         'packed_items': arr_finalPackedItemsDetails,
+        # Verifying that the vehicle dimensions used for packing are the same
+        # ones sent to the frontend ensures the visualization cube is the correct size.
         'vehicle_info': {
             **dict_vehicleInfo,
             'num_packages_loaded': len(arr_finalPackedItemsDetails),
@@ -269,3 +288,63 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
             'total_packed_service_time': round(flt_totalPackedServiceTime)
         }
     }
+
+
+def _postProcessPacking(objBin):
+    """
+    This function applies gravity and boundary enforcement for physical realism.
+    """
+    print("Starting packing post-processing for physical realism...")
+    
+    list_items = objBin.items
+    # Using floor for bin dimensions ensures we use integer math for boundaries.
+    bin_dims = [np.floor(float(objBin.width)), np.floor(float(objBin.height)), np.floor(float(objBin.depth))]
+    
+    # Stage 1: Iterative Gravity Simulation to "settle" items.
+    # We loop multiple times to ensure items stack correctly.
+    for _ in range(3): # Iterate three times to settle complex stacks.
+        items_moved = 0
+        list_items.sort(key=lambda item: float(item.position[1]))
+        
+        for i, obj_item in enumerate(list_items):
+            flt_ix, flt_iy, flt_iz = [float(p) for p in obj_item.position]
+            flt_iw, flt_ih, flt_id = [float(d) for d in obj_item.get_dimension()]
+            
+            flt_supportHeight = 0.0
+            
+            # Find the highest point of support from all other items.
+            for j, obj_otherItem in enumerate(list_items):
+                if i == j: continue
+                
+                flt_ox, flt_oy, flt_oz = [float(p) for p in obj_otherItem.position]
+                flt_ow, flt_oh, flt_od = [float(d) for d in obj_otherItem.get_dimension()]
+                
+                bln_x_overlap = (flt_ix < flt_ox + flt_ow) and (flt_ox < flt_ix + flt_iw)
+                bln_z_overlap = (flt_iz < flt_oz + flt_od) and (flt_oz < flt_iz + flt_id)
+
+                if bln_x_overlap and bln_z_overlap and (flt_oy + flt_oh <= flt_iy + 0.1):
+                    flt_supportHeight = max(flt_supportHeight, flt_oy + flt_oh)
+
+            if flt_iy > flt_supportHeight:
+                obj_item.position[1] = str(flt_supportHeight)
+                items_moved += 1
+        
+        if items_moved == 0:
+            print("Item stack has settled.")
+            break
+
+    # Stage 2: Enforce strict container boundaries with integer precision.
+    for obj_item in list_items:
+        pos = [float(p) for p in obj_item.position]
+        dims = [float(d) for d in obj_item.get_dimension()]
+        
+        # Check and clamp each axis (X, Y, Z).
+        for axis in range(3):
+            if pos[axis] < 0: pos[axis] = 0
+            # Ensure the top/far edge of the item is inside the boundary.
+            if pos[axis] + dims[axis] > bin_dims[axis]:
+                pos[axis] = bin_dims[axis] - dims[axis]
+        
+        obj_item.position = [str(p) for p in pos]
+        
+    print("Packing post-processing complete.")

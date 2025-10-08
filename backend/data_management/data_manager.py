@@ -97,17 +97,6 @@ def _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFAUL
     str_cacheFilename = f"{fltVehicleCapacityCm3}.json"
     str_cacheFilepath = os.path.join(g_str_DATA_CACHE_DIR, str_cacheFilename)
 
-    # DISABLE THIS PROCESS
-    # Scan the cache directory and remove any JSON files that do not match the
-    # currently requested capacity. This enforces the "only one cache file" rule.
-    # try:
-    #     for str_existing_file in os.listdir(g_str_DATA_CACHE_DIR):
-    #         if str_existing_file.endswith('.json') and str_existing_file != str_cacheFilename:
-    #             print(f"Removing outdated cache file: {str_existing_file}")
-    #             os.remove(os.path.join(g_str_DATA_CACHE_DIR, str_existing_file))
-    # except Exception as obj_err:
-    #     print(f"Warning: Could not clear old cache files. Error: {obj_err}")
-
     # If a pre-processed cache file already exists, load and return it directly. This is the fast path.
     if os.path.exists(str_cacheFilepath):
         if dictCancellationFlag['is_cancelled']: raise CancelledException()
@@ -145,16 +134,27 @@ def _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFAUL
             for str_packageId, dict_details in dict_packagesAtStop.items():
                 dict_dims = dict_details.get('dimensions', {})
                 try:
-                    # Calculate volume and ensure dimensions are valid.
-                    flt_volume = float(dict_dims.get('height_cm', 0)) * \
-                                 float(dict_dims.get('width_cm', 0)) * \
-                                 float(dict_dims.get('depth_cm', 0))
-                    if (flt_volume > 0): # Only include items with valid, non-zero volume.
+                    # Capture individual dimensions for validation.
+                    flt_h = float(dict_dims.get('height_cm', 0))
+                    flt_w = float(dict_dims.get('width_cm', 0))
+                    flt_d = float(dict_dims.get('depth_cm', 0))
+                    
+                    # MODIFIED: THIS IS THE CRITICAL DATA SANITIZATION FIX.
+                    # It ensures that only items with valid, non-zero dimensions
+                    # are ever written to a cache file.
+                    #
+                    # ATTENTION: If you have run this application before, you MUST
+                    # delete the 'data_cache' directory in your project folder.
+                    # This action forces the system to recreate the cache files
+                    # using this new, stricter validation logic, thereby purging all
+                    # invalid "flat" items from the dataset.
+                    if (flt_h > 0 and flt_w > 0 and flt_d > 0):
+                        flt_volume = flt_h * flt_w * flt_d
                         arr_allPackagesInfo.append({
                             'id': str_packageId, 'route_id': str_routeId, 'stop_id': str_stopId,
-                            'height': float(dict_dims.get('height_cm')),
-                            'width': float(dict_dims.get('width_cm')),
-                            'depth': float(dict_dims.get('depth_cm')),
+                            'height': flt_h,
+                            'width': flt_w,
+                            'depth': flt_d,
                             'volume': flt_volume,
                             'service_time': float(dict_details.get('planned_service_time_seconds', 0))
                         })

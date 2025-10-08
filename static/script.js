@@ -419,8 +419,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     /**
-     * REVISED: Now includes full interactivity with raycasting for object picking,
-     * highlighting of selected items, and a dynamic info panel to display data.
+     * MODIFIED: Implemented the ultimate failsafe to prevent rendering invalid items.
      */
     function _fnOpenVisualizationWindow() {
         if (!g_obj_lastResults) {
@@ -439,25 +438,45 @@ document.addEventListener("DOMContentLoaded", () => {
                 <style>
                     body { margin: 0; overflow: hidden; font-family: sans-serif; }
                     canvas { display: block; }
-                    /* NEW: CSS for the information panel. */
-                    #info-panel {
+                    .info-panel {
                         position: absolute;
                         top: 10px;
-                        left: 10px;
                         padding: 10px;
                         background: rgba(0, 0, 0, 0.7);
                         color: white;
                         border-radius: 5px;
-                        display: none; /* Hidden by default. */
                         font-size: 14px;
                         line-height: 1.5;
+                        pointer-events: none;
                     }
-                    #info-panel strong { color: #e08128; }
+                    #item-info-panel {
+                        left: 10px;
+                        display: none; 
+                    }
+                    #item-info-panel strong { color: #e08128; }
+                    #controls-panel {
+                        right: 10px;
+                        text-align: right;
+                    }
+                    #controls-panel button {
+                        margin-top: 5px;
+                        padding: 8px 12px;
+                        background: #333;
+                        color: white;
+                        border: 1px solid #555;
+                        border-radius: 5px;
+                        cursor: pointer;
+                        pointer-events: auto;
+                    }
+                    #controls-panel button:hover { background: #555; }
                 </style>
             </head>
             <body>
-                <!-- NEW: HTML structure for the info panel. -->
-                <div id="info-panel"></div>
+                <div id="item-info-panel" class="info-panel"></div>
+                <div id="controls-panel" class="info-panel">
+                    <b>Controls:</b> Left-Click to Rotate, Right-Click to Pan, Scroll to Zoom.
+                    <br/><button id="reset-view-btn">Reset View</button>
+                </div>
 
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>
                 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"><\/script>
@@ -477,90 +496,133 @@ document.addEventListener("DOMContentLoaded", () => {
                     directionalLight.position.set(200, 500, 300);
                     scene.add(directionalLight);
 
-                    const containerGeom = new THREE.BoxGeometry(${vehicle_info.width}, ${vehicle_info.height}, ${vehicle_info.depth});
+                    const vehicleW = ${vehicle_info.width};
+                    const vehicleH = ${vehicle_info.height};
+                    const vehicleD = ${vehicle_info.depth};
+
+                    const containerGeom = new THREE.BoxGeometry(vehicleW, vehicleH, vehicleD);
                     const containerEdges = new THREE.EdgesGeometry(containerGeom);
                     const containerLines = new THREE.LineSegments(containerEdges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 }));
-                    containerLines.position.set(${vehicle_info.width / 2}, ${vehicle_info.height / 2}, ${vehicle_info.depth / 2});
+                    const containerCenter = new THREE.Vector3(vehicleW / 2, vehicleH / 2, vehicleD / 2);
+                    containerLines.position.copy(containerCenter);
                     scene.add(containerLines);
                     
                     const colorCache = {};
-                    function getRandomColor(id) {
+                    function getDeterministicColor(id) {
                         if (!colorCache[id]) {
-                            const letters = '89ABCDEF';
-                            let color = '#';
-                            for (let i = 0; i < 6; i++) {
-                                color += letters[Math.floor(Math.random() * 8)];
+                            let hash = 0;
+                            for (let i = 0; i < id.length; i++) {
+                                hash = id.charCodeAt(i) + ((hash << 5) - hash);
+                                hash = hash & hash;
                             }
-                            colorCache[id] = color;
+                            const hue = Math.abs(hash % 360);
+                            colorCache[id] = new THREE.Color(\`hsl(\${hue}, 80%, 60%)\`);
                         }
-                        return new THREE.Color(colorCache[id]);
+                        return colorCache[id];
                     }
 
-                    // NEW: An array to hold the package meshes for raycasting.
                     const packageMeshes = [];
                     const packedItems = ${JSON.stringify(packed_items)};
                     packedItems.forEach(item => {
-                        const itemGeom = new THREE.BoxGeometry(item.width, item.height, item.depth);
-                        const itemMaterial = new THREE.MeshLambertMaterial({ color: getRandomColor(item.id) });
-                        const itemMesh = new THREE.Mesh(itemGeom, itemMaterial);
-                        itemMesh.position.set(
-                            item.position_x + item.width / 2,
-                            item.position_y + item.height / 2,
-                            item.position_z + item.depth / 2
-                        );
-                        // NEW: Attach the full item data to the mesh object for later retrieval.
-                        itemMesh.userData = item;
-                        scene.add(itemMesh);
-                        packageMeshes.push(itemMesh);
+                        // MODIFIED: This is the final client-side failsafe.
+                        // It explicitly checks that an item has valid 3D dimensions before
+                        // attempting to render it. This guarantees that even if corrupt data
+                        // were to reach the frontend, it would simply be ignored rather than
+                        // causing a visual artifact.
+                        if (item.width > 0 && item.height > 0 && item.depth > 0) {
+                            const visualScale = 0.999;
+                            const itemGeom = new THREE.BoxGeometry(
+                                item.width * visualScale, 
+                                item.height * visualScale, 
+                                item.depth * visualScale
+                            );
+                            
+                            const itemMaterial = new THREE.MeshLambertMaterial({ color: getDeterministicColor(item.id) });
+                            const itemMesh = new THREE.Mesh(itemGeom, itemMaterial);
+                            itemMesh.position.set(
+                                item.position_x + item.width / 2,
+                                item.position_y + item.height / 2,
+                                item.position_z + item.depth / 2
+                            );
+                            itemMesh.userData = item;
+                            scene.add(itemMesh);
+                            packageMeshes.push(itemMesh);
+                        }
                     });
+                    
+                    const maxDim = Math.max(vehicleW, vehicleH, vehicleD);
+                    camera.position.x = -maxDim; 
+                    camera.position.y = containerCenter.y;
+                    camera.position.z = containerCenter.z;
+                    controls.target.copy(containerCenter);
+                    
+                    controls.saveState();
 
-                    const maxDim = Math.max(${vehicle_info.width}, ${vehicle_info.height}, ${vehicle_info.depth});
-                    camera.position.z = maxDim * 1.5;
-                    camera.position.x = maxDim * 0.8;
-                    camera.position.y = maxDim * 0.7;
-                    controls.target.set(containerLines.position.x, containerLines.position.y, containerLines.position.z);
-                    controls.update();
-
-                    // --- NEW: INTERACTIVITY LOGIC ---
                     const raycaster = new THREE.Raycaster();
                     const mouse = new THREE.Vector2();
                     let selectedObject = null;
                     const highlightMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFF00, transparent: true, opacity: 0.8 });
+                    const infoDiv = document.getElementById('item-info-panel');
+                    
+                    function createTextSprite(message, position, fontSize = 14) {
+                        const canvas = document.createElement('canvas');
+                        const context = canvas.getContext('2d');
+                        context.font = \`Bold \${fontSize}px Arial\`;
+                        const textWidth = context.measureText(message).width;
+                        canvas.width = textWidth + 20;
+                        canvas.height = fontSize + 20;
+                        
+                        context.font = \`Bold \${fontSize}px Arial\`;
+                        context.fillStyle = 'white';
+                        context.textAlign = 'center';
+                        context.textBaseline = 'middle';
+                        context.fillText(message, canvas.width / 2, canvas.height / 2);
+                        
+                        const texture = new THREE.CanvasTexture(canvas);
+                        const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+                        const sprite = new THREE.Sprite(spriteMaterial);
+                        sprite.scale.set(canvas.width, canvas.height, 1.0);
+                        sprite.position.copy(position);
+                        scene.add(sprite);
+                    }
+
+                    const labelOffset = 30;
+                    createTextSprite('Back', new THREE.Vector3(vehicleW + labelOffset, containerCenter.y, containerCenter.z));
+                    createTextSprite('Front', new THREE.Vector3(-labelOffset, containerCenter.y, containerCenter.z));
+                    createTextSprite('Top', new THREE.Vector3(containerCenter.x, vehicleH + labelOffset, containerCenter.z));
+                    createTextSprite('Bottom', new THREE.Vector3(containerCenter.x, -labelOffset, containerCenter.z));
+                    createTextSprite('Right Side', new THREE.Vector3(containerCenter.x, containerCenter.y, vehicleD + labelOffset));
+                    createTextSprite('Left Side', new THREE.Vector3(containerCenter.x, containerCenter.y, -labelOffset));
+                    
+                    document.getElementById('reset-view-btn').addEventListener('click', () => {
+                        controls.reset();
+                    });
 
                     window.addEventListener('click', (event) => {
-                        // Normalize mouse coordinates to [-1, 1] range.
                         mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
                         mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
-
                         raycaster.setFromCamera(mouse, camera);
                         const intersects = raycaster.intersectObjects(packageMeshes);
 
-                        // If a previous object was selected, restore its original material.
                         if (selectedObject) {
                             selectedObject.material = selectedObject.userData.originalMaterial;
                             selectedObject = null;
                         }
-                        
-                        document.getElementById('info-panel').style.display = 'none'; // Hide panel by default
+                        infoDiv.style.display = 'none';
 
                         if (intersects.length > 0) {
-                            // The first object in the array is the closest one.
                             const intersected = intersects[0].object;
                             selectedObject = intersected;
-
-                            // Store original material and apply highlight.
                             selectedObject.userData.originalMaterial = selectedObject.material;
                             selectedObject.material = highlightMaterial;
                             
-                            // Display the info.
                             const data = intersected.userData;
-                            const infoDiv = document.getElementById('info-panel');
                             infoDiv.style.display = 'block';
                             infoDiv.innerHTML = \`
                                 <strong>Product ID:</strong> \${data.id}<br>
                                 <strong>Volume:</strong> \${Math.round(data.volume).toLocaleString()} cm³<br>
                                 <strong>Service Time:</strong> \${data.service_time} s<br>
-                                <strong>Dimensions (H×L×W):</strong> \${data.height}×\${data.depth}×\${data.width} cm
+                                <strong>Dimensions (W×H×D):</strong> \${data.width}×\${data.height}×\${data.depth} cm
                             \`;
                         }
                     });
@@ -586,5 +648,14 @@ document.addEventListener("DOMContentLoaded", () => {
         vizWindow.document.open();
         vizWindow.document.write(htmlContent);
         vizWindow.document.close();
+
+        obj_visualizeBtn.disabled = true;
+        const checkWindowClosed = setInterval(() => {
+            if (vizWindow.closed) {
+                clearInterval(checkWindowClosed);
+                obj_visualizeBtn.disabled = false;
+                console.log("Visualization window closed, button re-enabled.");
+            }
+        }, 500);
     }
 });

@@ -32,11 +32,6 @@ body {
     background-color: #f5f5f5;
 }
 
-h1 {
-    line-height: 1.2;
-    text-align: center;
-}
-
 h2 {
     font-size: 28px;
     font-weight: 500;
@@ -51,11 +46,29 @@ h3 {
     color: #e08128;
 }
 
+.main-header {
+    background-color: #121212;
+    color: white;
+    padding: 15px 0;
+    text-align: center;
+    position: relative;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+.main-header h1 {
+    color: #e08128;
+    font-size: 36px;
+    font-weight: 700;
+}
+.main-header h2 {
+    font-size: 16px;
+    font-weight: 400;
+    color: #d1d1d1;
+}
 
 /* --- Main Layout & Sections --- */
 .container {
     display: flex;
-    margin: 60px auto;
+    margin: 30px auto; 
     max-width: 1300px;
     width: fit-content;
 }
@@ -63,7 +76,6 @@ h3 {
 .left-section {
     flex: 1;
     padding: 15px 30px 0 30px;
-    position: relative; /* Added for positioning the guides button */
 }
 
 .right-section {
@@ -72,16 +84,45 @@ h3 {
     color: white;
     flex: 1;
     padding: 30px;
-    position: relative;
+    position: relative; 
 }
+
+/* MODIFIED: Reverting to a more standard bottom margin. */
+.dataset-title {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: left;
+    margin-bottom: 30px;
+}
+
+.algorithm-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px; 
+    margin-top: 20px;
+}
+
+#result-algorithm-name {
+    text-align: left;
+    font-size: 28px;
+}
+
 
 /* --- Component Styles: Banners & Metrics --- */
 .banners {
     display: grid;
     gap: 20px;
     grid-template-columns: repeat(2, 1fr);
-    margin: 30px 0;
 }
+
+/* MODIFIED: This is the new, primary rule for ensuring consistent vertical spacing */
+/* between all major content groups in both the left and right panels. */
+.content-block {
+    margin-top: 30px;
+}
+
 
 .white-bg {
     background-color: #ffffff;
@@ -98,21 +139,20 @@ h3 {
     padding: 15px;
 }
 
+/* MODIFIED: Margin is now handled by the parent .content-block */
 .metrics {
     display: grid;
     grid-template-columns: repeat(1, 1fr);
+    /* margin-top has been removed. */
 }
 
-/* NEW: Styles for the header containing the "Visualize" button */
-.metrics-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px; /* Replaces margin-top on metric-info */
+.metric-info {
+    margin-top: 10px; /* Added back to give space between label and box */
 }
+
 
 #visualize-btn {
-    display: none; /* Hidden by default, shown via JS */
+    display: none; 
     align-items: center;
     gap: 8px;
     background-color: #e08128;
@@ -124,6 +164,8 @@ h3 {
     font-size: 14px;
     cursor: pointer;
     transition: background-color 0.2s;
+    height: 40px;
+    white-space: nowrap;
 }
 
 #visualize-btn i {
@@ -134,13 +176,12 @@ h3 {
     background-color: #90541c;
 }
 
-.metric-info {
-    display: grid;
-    gap: 5px;
-    grid-template-columns: repeat(1, 1fr);
-    /* margin-top: 10px;  REMOVED: This is now handled by metrics-header */
-    padding: 15px 30px;
+#visualize-btn:disabled {
+    background-color: #555;
+    cursor: not-allowed;
+    color: #999;
 }
+
 
 .metric-item {
     align-items: center;
@@ -165,8 +206,9 @@ h3 {
 
 .guides-btn {
     position: absolute;
-    top: -45px;
-    left: 30px;
+    top: 50%;
+    right: 30px;
+    transform: translateY(-50%);
     display: flex;
     align-items: center;
     gap: 10px;
@@ -510,7 +552,6 @@ input:checked + .slider:before {
     background-color: #90541c !important;
 }
 
-/* NEW: Style for highlighted text within the guide */
 .guides-content .highlight-text {
     color: #e08128;
     font-weight: 500;

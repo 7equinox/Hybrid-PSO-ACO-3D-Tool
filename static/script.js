@@ -133,7 +133,7 @@ document.addEventListener("DOMContentLoaded", () => {
         g_bln_loadCancellationRequested = false; 
         obj_runSimBtn.disabled = true;
         _fnResetInitialUI();
-        _fnShowLoader("Starting data load...", { showLoadCancel: true, loadCancelDisabled: true });
+        _fnShowLoader("Starting data load...", { showLoadCancel: false, loadCancelDisabled: false });
         try {
             const response = await fetch('/start_data_loading', {
                 method: 'POST',

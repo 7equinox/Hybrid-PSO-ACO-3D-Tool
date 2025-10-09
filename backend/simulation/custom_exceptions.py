@@ -1,15 +1,15 @@
 """
-System Name: Hybrid PSO-ACO 3D Loading Optimization Tool
-Module Name: Simulation
+System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
+Module Name: Simulation Support
 
-Purpose of this file:
-Defines custom exceptions used across the simulation and algorithm modules
-to handle specific flow control situations. The primary purpose of having a
-dedicated `CancelledException` is to enable a graceful and immediate exit
-from the deep computational loops found in the metaheuristic algorithms when a
-task is cancelled by the user via the web interface. This is a key component
-of the application's asynchronous architecture, ensuring the research tool
-remains responsive and usable during long-running experiments.
+Purpose of a this file:
+This file defines a custom exception class, `CancelledException`, which is a specialized
+tool for handling a specific flow-control situation in our application. The primary purpose
+is to enable a clean, immediate, and graceful exit from the deeply nested computational
+loops found within the metaheuristic algorithms when a task is cancelled by the user from
+the web interface. This is a key technical component of the application's asynchronous
+architecture, ensuring the research tool remains responsive and robust during long-running
+experiments.
 
 Author/s:
 ALFARO, ABRAM S.
@@ -21,18 +21,19 @@ ESTONILO, JULIUS EVAN C.
 
 class CancelledException(Exception):
     """
-    A custom exception that is raised when a simulation or data-loading task
-    is cancelled by the user.
+    A custom exception that is "raised" (or triggered) whenever an algorithm or
+    data-loading process detects that its cancellation flag has been set to True.
 
-    Purpose in Methodology:
-    The metaheuristic algorithms in Chapter 3 operate within nested loops that
-    can run for many thousands of iterations. Simply checking a boolean flag
-    in every loop can be cumbersome and may not allow for immediate termination.
+    Purpose in the Research Methodology:
+    The metaheuristic algorithms defined in Chapter 3 (PSO, ACO, Hybrid) operate
+    within multiple layers of loops (e.g., loops for generations, loops for particles,
+    loops for constructing solutions). Simply checking a boolean flag in the outermost
+    loop might not terminate the process immediately if it's busy in a deep inner loop.
 
-    By raising this exception when the cancellation flag is detected, the program
-    can immediately unwind the call stack and jump out of the deepest parts of
-    the algorithm's execution. This provides a clean, efficient, and immediate
-    way to terminate long-running processes, which is essential for the
-    usability of the interactive research instrument.
+    By "raising" this special exception when the cancellation flag is detected, the program
+    can immediately interrupt its current task, unwind the entire call stack (jump out of
+    all the nested loops at once), and be caught by a dedicated "except" block at the highest
+    level. This provides a clean, efficient, and immediate way to terminate long-running
+    processes, which is essential for the usability of this interactive research instrument.
     """
     pass

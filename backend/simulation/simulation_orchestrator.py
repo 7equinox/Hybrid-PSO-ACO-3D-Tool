@@ -1,14 +1,20 @@
 """
-System Name: Hybrid PSO-ACO 3D Loading Optimization Tool
-Module Name: Simulation
+System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
+Module Name: Simulation Orchestration
 
 Purpose of this file:
-This module acts as the orchestrator for the 'Experimentation Stage' as
-defined in the research methodology. It is the core of the experimental
-process, responsible for setting up a defined problem (algorithm, items,
-container), applying the crucial sampling and dynamic constraints, executing
-the selected optimization algorithm, and capturing all performance and
-scalability metrics required for analysis to answer the research questions.
+This module is the heart of the 'Experimentation Stage' as defined in the research
+methodology. It acts as the master conductor for a single, complete experimental
+run. Its responsibilities are to:
+1. Receive the problem parameters (algorithm choice, vehicle size) from the main application.
+2. Load the appropriate dataset via the Data Management module.
+3. Implement crucial experimental controls, such as the sampling method and the dynamic constraint.
+4. Select and execute the chosen optimization algorithm (PSO, ACO, or Hybrid).
+5. Meticulously measure the performance and scalability metrics (the dependent variables).
+6. Consolidate all results into a structured format for the frontend.
+This module is where the abstract research design is translated into concrete,
+executable steps, ensuring that every experiment is run under the same controlled
+conditions.
 
 Author/s:
 ALFARO, ABRAM S.
@@ -17,102 +23,110 @@ DELA CRUZ, JUAN GABRIEL D.
 ERFE, JEFFERSON B.
 ESTONILO, JULIUS EVAN C.
 """
-import time
-import random
-import numpy as np
-from memory_profiler import memory_usage
-from py3dbp import Packer, Bin, Item
+# --- Import necessary libraries ---
+import time         # For measuring computation time.
+import random       # For random sampling and other stochastic processes in the algorithms.
+import numpy as np  # A powerful library for numerical operations, used here for statistical calculations.
+from memory_profiler import memory_usage # A specialized tool for measuring peak RAM usage.
+from py3dbp import Packer, Bin, Item # The core library for performing the 3D bin packing simulation.
 
-# Import dependent modules from within the application.
-from backend.data_management.data_manager import fn_getSimulationDataForVehicle
-from backend.simulation.performance_metrics import fn_calculateAllMetrics
+
+# --- Import Custom Application Modules ---
+from backend.data_management.data_manager import fnGetSimulationDataForVehicle
+from backend.simulation.performance_metrics import fnCalculateAllMetrics
 from backend.simulation.custom_exceptions import CancelledException
-from backend.algorithms.pso_algorithm import fn_runPsoAlgorithm
-from backend.algorithms.aco_algorithm import fn_runAcoAlgorithm
-from backend.algorithms.hybrid_pso_aco_algorithm import fn_runHybridPsoAcoAlgorithm
+from backend.algorithms.pso_algorithm import fnRunPsoAlgorithm
+from backend.algorithms.aco_algorithm import fnRunAcoAlgorithm
+from backend.algorithms.hybrid_pso_aco_algorithm import fnRunHybridPsoAcoAlgorithm
 
-# The orchestrator's main function now accepts a progress tracker dictionary.
-def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled, dictProgressTracker):
+
+def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled, dictProgressTracker):
     """
-    This is the main function for a single experimental run. It orchestrates
-    the entire process from data loading to algorithm execution and result
-    consolidation, ensuring each step aligns with the research methodology.
+    This is the main, overarching function for a single experimental run. It orchestrates
+    the entire process from data loading to algorithm execution and result consolidation,
+    ensuring each step is executed precisely according to the research methodology.
+
+    Args:
+        strAlgorithmName (str): The name of the algorithm selected by the user.
+        fltCapacityCm3 (float): The selected vehicle volume capacity.
+        dictCancellationFlag (dict): The shared flag for checking user-initiated cancellations.
+        blnIsDynamicConstraintEnabled (bool): Flag for applying the dynamic constraint.
+        dictProgressTracker (dict): A shared dictionary to report real-time progress to the UI.
+
+    Returns:
+        dict: A comprehensive dictionary containing all metrics and results of the simulation.
     """
     if dictCancellationFlag['is_cancelled']:
         raise CancelledException()
 
-    dictProgressTracker['message'] = "Loading dataset..."
+    # --- Stage 1: Data Loading ---
+    dictProgressTracker['message'] = "Loading dataset..." # Update UI feedback.
     print("Simulation started: Loading full dataset for the given capacity...")
-    # Fetch the complete dataset associated with the selected vehicle capacity.
-    dict_vehicleInfo, arr_packagesInfo = fn_getSimulationDataForVehicle(fltCapacityCm3, dictCancellationFlag)
+    # Fetch the complete, aggregated dataset for the selected vehicle capacity from the data manager.
+    dict_vehicleInfo, arr_packagesInfo = fnGetSimulationDataForVehicle(fltCapacityCm3, dictCancellationFlag)
 
-    # Halt if the required data could not be loaded.
+    # If the required data could not be loaded for any reason, halt the process.
     if not dict_vehicleInfo or not arr_packagesInfo:
         if dictCancellationFlag['is_cancelled']: raise CancelledException()
         return {'error': 'Could not get vehicle info or package data was missing.'}
 
-    # --- SAMPLING METHOD IMPLEMENTATION (from Chapter 3 Methodology) ---
-    # The full dataset for larger vehicles can contain over 82,155 items, which
-    # is computationally infeasible to process on standard hardware (e.g., causing
-    # massive memory allocation failures). To overcome this, we implement the
-    # 'Volume-Constrained Stratified Random Sampling' method. This creates smaller,
-    # yet representative and solvable, problem instances, enabling a fair benchmark
-    # across all algorithms without compromising the integrity of the data.
+    # --- Stage 2: Sampling Method Implementation ---
+    # This is a critical engineering step to solve a major computational problem.
+    # The full dataset for larger vehicles can contain tens of thousands of items, which would
+    # require enormous amounts of memory and weeks of computation time. To make the experiment
+    # feasible on standard hardware, we implement a 'Volume-Constrained Stratified Random
+    # Sampling' method. This technique intelligently creates a smaller, yet statistically
+    # representative, problem instance. This allows us to fairly benchmark the algorithms
+    # under controlled, solvable conditions.
     dictProgressTracker['message'] = "Sampling data..."
-    MAX_SAMPLE_SIZE = 400 # A hard limit to prevent out-of-memory errors.
-    if len(arr_packagesInfo) > MAX_SAMPLE_SIZE:
-        print(f"Original dataset has {len(arr_packagesInfo)} items. Applying sampling to reduce to {MAX_SAMPLE_SIZE}.")
+    INT_MAX_SAMPLE_SIZE = 400 # A hard limit to prevent out-of-memory errors during the experiment.
+    if len(arr_packagesInfo) > INT_MAX_SAMPLE_SIZE:
+        print(f"Original dataset has {len(arr_packagesInfo)} items. Applying sampling to reduce to {INT_MAX_SAMPLE_SIZE}.")
 
-        # Step 1: Stratification. Items are categorized into Small, Medium, and Large based on volume percentiles.
-        # This ensures the sample maintains the same general distribution of item sizes as the original dataset.
+        # Step 2a: Stratification. We categorize items into Small, Medium, and Large based on volume.
+        # This ensures that our smaller sample maintains the same general distribution of item sizes
+        # as the much larger original dataset, preserving its real-world characteristics.
         arr_volumes = [p['volume'] for p in arr_packagesInfo]
         flt_p33, flt_p66 = np.percentile(arr_volumes, [33.3, 66.7])
         arr_smallItems = [p for p in arr_packagesInfo if p['volume'] <= flt_p33]
         arr_mediumItems = [p for p in arr_packagesInfo if flt_p33 < p['volume'] <= flt_p66]
         arr_largeItems = [p for p in arr_packagesInfo if p['volume'] > flt_p66]
 
-        # Shuffle each stratum to ensure random selection.
         random.shuffle(arr_smallItems)
         random.shuffle(arr_mediumItems)
         random.shuffle(arr_largeItems)
 
-        # Steps 2 & 3: Proportional Allocation & Constrained Random Selection.
-        # We iteratively build a new sample by adding items from each stratum. The process
-        # is constrained by both the max sample size and the total vehicle volume,
-        # guaranteeing a feasible and standardized problem instance for the experiment.
+        # Step 2b: Proportional and Constrained Selection.
+        # We build the new sample by iteratively adding items from each size category. The process
+        # stops when we either reach the max sample size OR the total volume of sampled items
+        # exceeds the vehicle's capacity. This guarantees a feasible and standardized problem.
         arr_sampledPackages = []
         flt_currentVolume = 0.0
         iter_small = iter(arr_smallItems)
         iter_medium = iter(arr_mediumItems)
         iter_large = iter(arr_largeItems)
 
-        while len(arr_sampledPackages) < MAX_SAMPLE_SIZE:
+        while len(arr_sampledPackages) < INT_MAX_SAMPLE_SIZE:
             bln_addedInCycle = False
-            # Attempt to add items proportionally by iterating through the strata.
             for iterator in [iter_small, iter_medium, iter_large]:
                 try:
                     obj_item = next(iterator)
-                    # The crucial volume constraint check.
-                    if flt_currentVolume + obj_item['volume'] <= fltCapacityCm3:
+                    if flt_currentVolume + obj_item['volume'] <= fltCapacityCm3: # The volume constraint.
                         arr_sampledPackages.append(obj_item)
                         flt_currentVolume += obj_item['volume']
                         bln_addedInCycle = True
                 except StopIteration:
-                    pass # This stratum is exhausted.
-                if len(arr_sampledPackages) >= MAX_SAMPLE_SIZE: break
-            
-            # If a full pass through all strata adds no new items, stop.
+                    pass
+                if len(arr_sampledPackages) >= INT_MAX_SAMPLE_SIZE: break
             if not bln_addedInCycle: break
-        
-        # The original large package list is now replaced by our smaller, feasible sample.
-        arr_packagesInfo = arr_sampledPackages
+
+        arr_packagesInfo = arr_sampledPackages # The smaller sample now becomes our official problem instance.
         print(f"Sampling complete. New problem size: {len(arr_packagesInfo)} items.")
 
-
-    # --- DYNAMIC CONSTRAINT IMPLEMENTATION (from Chapter 3 Methodology) ---
-    # To test the algorithms' adaptability to real-world disruptions (like last-minute
-    # order changes), a random subset (10-20%) of items is removed from the problem
-    # instance just before optimization begins. This is now controlled by a toggle on the frontend.
+    # --- Stage 3: Dynamic Constraint Implementation ---
+    # As per the methodology, this step simulates real-world disruptions. If enabled by the user,
+    # it randomly removes 10-20% of the items from the problem right before optimization begins.
+    # This directly tests the algorithms' adaptability to sudden changes, a key research goal.
     dictProgressTracker['message'] = "Applying constraints..."
     if blnIsDynamicConstraintEnabled:
         print("Dynamic constraint is ENABLED. Removing 10-20% of items from the problem.")
@@ -125,149 +139,127 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
         print("Dynamic constraint is DISABLED. Using the full set of sampled items.")
         arr_packagesToLoad = arr_packagesInfo
 
-    # Convert the problem data into the format required by the `py3dbp` library.
+    # Convert our simplified data into the specific 'Item' and 'Bin' objects required by the py3dbp library.
     arr_itemsToPack = [Item(p['id'], p['width'], p['height'], p['depth'], 1) for p in arr_packagesToLoad]
-    
     obj_bin = Bin(
         dict_vehicleInfo['id'],
         dict_vehicleInfo['width'],
         dict_vehicleInfo['height'],
         dict_vehicleInfo['depth'],
-        1e6 # Max weight is set high as our problem is volume-constrained, not weight-constrained.
+        1e6 # Max weight is set very high, as our problem is volume-constrained, not weight-constrained.
     )
 
-    # The packing evaluation is the most expensive operation. A cache is
-    # introduced to store the results of previously evaluated solutions. If an
-    # algorithm re-tests the same item permutation, the cached result is
-    # returned instantly, avoiding a costly re-simulation.
+    # --- Performance Optimization: Fitness Caching ---
+    # The most expensive part of the simulation is evaluating the quality of a solution. To
+    # speed things up, we use a cache (a dictionary). If an algorithm tries to re-evaluate the
+    # same packing order, we return the cached result instantly instead of re-running the
+    # entire complex packing and unloading simulation. This is a form of memoization.
     dict_fitnessCache = {}
 
-    # --- FITNESS FUNCTION (Answering RQ1 & RQ2) ---
-    # This function is the heart of the evaluation. It takes a potential solution (an item packing order)
-    # from an algorithm and calculates its quality based on the key research metrics: Volume Utilization,
-    # Relocation Count, and Unloading Sequence Length. This single function ensures all three
-    # algorithms are judged by the exact same, unbiased criteria.
-    def fn_evaluateSolution(arrItemOrderIndices):
-        # Convert the solution (a list of indices) to a tuple so it can be used as a dictionary key.
-        tpl_solutionKey = tuple(arrItemOrderIndices)
+    # --- The Fitness Function (Directly Answering Research Questions 1 & 2) ---
+    # This single function is the heart of the evaluation process. It takes a potential solution
+    # (a specific packing order) from an algorithm and calculates its quality based on our key
+    # research metrics: Volume Utilization, Relocation Count, Unloading Feasibility, and Sequence Length.
+    # By using this exact same function to judge all three algorithms, we ensure a fair,
+    # unbiased, and scientifically sound comparison. This directly addresses the Statement of the Problem.
+    def fnEvaluateSolution(arrItemOrderIndices):
+        tpl_solutionKey = tuple(arrItemOrderIndices) # Convert to tuple to use as a dictionary key.
         if tpl_solutionKey in dict_fitnessCache:
-            # Return the cached fitness value immediately.
-            return dict_fitnessCache[tpl_solutionKey]
+            return dict_fitnessCache[tpl_solutionKey] # Return cached result if available.
 
-        # Allow the process to be cancelled gracefully mid-evaluation.
         if dictCancellationFlag['is_cancelled']:
             raise CancelledException()
 
-        # A fresh packer and bin are created for each evaluation to ensure independence.
         obj_packer = Packer()
         obj_freshBin = Bin(obj_bin.name, obj_bin.width, obj_bin.height, obj_bin.depth, obj_bin.max_weight)
         obj_packer.add_bin(obj_freshBin)
 
-        # Add items to the packer in the specific order dictated by the algorithm's solution.
         for int_i in arrItemOrderIndices:
-            obj_packer.add_item(arr_itemsToPack[int_i])
+            obj_packer.add_item(arr_itemsToPack[int_i]) # Add items in the proposed order.
         
-        # MODIFIED: A third crucial parameter is now included.
-        # 3. distribute_items=True: This enables the library's built-in item rotation
-        #    logic, allowing it to find much denser packing solutions.
-        obj_packer.pack(bigger_first=True, distribute_items=True, number_of_decimals=0) 
-        
+        # This is the core packing simulation. The `distribute_items=True` parameter is
+        # crucial as it allows the library to rotate items to find a denser fit.
+        obj_packer.pack(bigger_first=True, distribute_items=True, number_of_decimals=0)
+
         arr_packedItems = obj_packer.bins[0].items
         if not arr_packedItems:
-            # If the packing order results in no items being packed, return the worst-case fitness.
+            # If a solution results in no items being packed, it's given the worst possible fitness score.
             tpl_fitness = (0, float('inf'), float('inf'))
         else:
             # Delegate the calculation of all metrics to the dedicated performance_metrics module.
-            dict_metrics = fn_calculateAllMetrics(
-                arr_packedItems,
-                obj_bin.get_volume(),
-                arr_packagesToLoad
-            )
+            dict_metrics = fnCalculateAllMetrics(arr_packedItems, obj_bin.get_volume(), arr_packagesToLoad)
             
-            # An 'Infeasible' solution is heavily penalized. This guides the search
-            # away from packing arrangements that result in deadlocks during unloading.
+            # An 'Infeasible' solution (one with unloading deadlocks) is heavily penalized.
+            # This guides the algorithms away from such operationally disastrous arrangements.
             if dict_metrics['unloading_feasibility'] == 'Infeasible':
                 tpl_fitness = (0, float('inf'), float('inf'))
             else:
-                # Return the multi-objective fitness values.
+                # This tuple represents the multi-objective fitness of the solution.
                 tpl_fitness = (
-                        dict_metrics['volume_utilization'],
-                        dict_metrics['relocation_count'],
-                        dict_metrics['unloading_sequence_length']
-                    )
-                
-        # Store the newly computed result in the cache before returning it.
-        dict_fitnessCache[tpl_solutionKey] = tpl_fitness
+                    dict_metrics['volume_utilization'],
+                    dict_metrics['relocation_count'],
+                    dict_metrics['unloading_sequence_length']
+                )
+        
+        dict_fitnessCache[tpl_solutionKey] = tpl_fitness # Cache the result before returning.
         return tpl_fitness
 
-    # --- ALGORITHM SELECTION AND EXECUTION ---
-    # Select and run the appropriate algorithm based on the user's choice.
-    dict_algorithmMap = {
-        'PSO': fn_runPsoAlgorithm,
-        'ACO': fn_runAcoAlgorithm,
-        'PSO-ACO': fn_runHybridPsoAcoAlgorithm
-    }
+    # --- Stage 4: Algorithm Selection and Execution ---
+    # A mapping dictionary to select the correct algorithm function based on the user's choice.
+    dict_algorithmMap = { 'PSO': fnRunPsoAlgorithm, 'ACO': fnRunAcoAlgorithm, 'PSO-ACO': fnRunHybridPsoAcoAlgorithm }
     func_algorithm = dict_algorithmMap.get(strAlgorithmName)
 
     if not func_algorithm:
         return {'error': 'Invalid algorithm name specified.'}
-    
-    # --- SCALABILITY METRICS MEASUREMENT (Answering RQ3) ---
-    # The `memory_profiler` library is used to measure the peak RAM usage, and `time`
-    # is used to measure the total execution time. These two metrics are crucial for
-    # evaluating the scalability of each algorithm.
+
+    # --- Scalability Metrics Measurement (Answering Research Question 3) ---
+    # We "wrap" the execution of the algorithm with measurement tools. `time` is used to
+    # capture the total execution time, and the `memory_usage` function from the
+    # memory_profiler library tracks the peak RAM consumed. These two metrics are crucial
+    # for evaluating the scalability and resource efficiency of each algorithm.
     dictProgressTracker['message'] = "Running optimization..."
     tm_startTime = time.time()
-    # The memory_usage function wraps the algorithm call to monitor its resource consumption.
-    # The progress tracker is now passed to the selected algorithm function.
+    # The `memory_usage` function calls our algorithm and returns both the memory usage and the algorithm's own return values.
     flt_memUsage, (arr_bestSolutionIndices, tpl_bestFitness) = memory_usage(
-        (func_algorithm, (arr_itemsToPack, arr_packagesToLoad, fn_evaluateSolution, dictCancellationFlag, dictProgressTracker)),
+        (func_algorithm, (arr_itemsToPack, arr_packagesToLoad, fnEvaluateSolution, dictCancellationFlag, dictProgressTracker)),
         retval=True, max_usage=True, interval=0.1
     )
     flt_computationTime = round(time.time() - tm_startTime, 2)
-    
-    # --- POST-EXPERIMENTATION: DATA CONSOLIDATION ---
-    # After the algorithm finishes, this section takes the best solution it found
-    # and prepares a comprehensive result object to be sent back to the frontend for display.
+
+    # --- Stage 5: Post-Experimentation - Data Consolidation ---
+    # After the algorithm has finished and found its best solution, this section prepares a
+    # comprehensive, detailed result object to be sent back to the user interface for display.
     dictProgressTracker['message'] = "Consolidating results..."
     obj_finalPacker = Packer()
     obj_finalPacker.add_bin(obj_bin)
 
-    # MODIFIED: The incorrect 'set_rotation_options' call has been removed.
-    # Rotation is now handled by the 'distribute_items' parameter in the pack() method.
     for int_i in arr_bestSolutionIndices:
         obj_finalPacker.add_item(arr_itemsToPack[int_i])
 
     obj_finalPacker.pack(bigger_first=True, distribute_items=True, number_of_decimals=0)
-    
-    # This function applies gravity and boundary checks for physical realism.
-    _postProcessPacking(obj_finalPacker.bins[0])
+
+    # Apply a post-processing step to add physical realism (gravity).
+    _fnPostProcessPacking(obj_finalPacker.bins[0])
 
     arr_finalPackedItemsDetails = []
     flt_totalPackedVolume = 0
     flt_totalPackedServiceTime = 0
     
-    # Augment the original package data with the final packed positions.
+    # We combine the original package data with the final packed positions and dimensions from the simulation.
     for obj_item in obj_finalPacker.bins[0].items:
         dict_originalPackage = next((p for p in arr_packagesToLoad if p['id'] == obj_item.name), None)
         if dict_originalPackage:
-            # After rotation, the item's dimensions may have changed.
-            # We must use the item's final, rotated dimensions for the visualization.
-            w, h, d = obj_item.get_dimension()
-            
-            # The positions from py3dbp are strings, convert them to floats for calculations.
-            arr_pos = [float(p) for p in obj_item.position]
+            w, h, d = obj_item.get_dimension() # Get the final, possibly rotated, dimensions.
+            arr_pos = [float(p) for p in obj_item.position] # Convert string positions to numbers.
             
             arr_finalPackedItemsDetails.append({
-                **dict_originalPackage,
-                # Store the final, rotated dimensions.
-                "width": w, "height": h, "depth": d,
+                **dict_originalPackage, "width": w, "height": h, "depth": d, # Store final dimensions.
                 "position_x": arr_pos[0], "position_y": arr_pos[1], "position_z": arr_pos[2]
             })
             flt_totalPackedVolume += dict_originalPackage['volume']
             flt_totalPackedServiceTime += dict_originalPackage['service_time']
     
-    # Structure the final, comprehensive results dictionary.
+    # Construct the final, structured results dictionary that will be sent to the frontend.
     return {
         'algorithm_name': strAlgorithmName,
         'metrics': {
@@ -279,8 +271,6 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
             'unloading_sequence_length': tpl_bestFitness[2]
         },
         'packed_items': arr_finalPackedItemsDetails,
-        # Verifying that the vehicle dimensions used for packing are the same
-        # ones sent to the frontend ensures the visualization cube is the correct size.
         'vehicle_info': {
             **dict_vehicleInfo,
             'num_packages_loaded': len(arr_finalPackedItemsDetails),
@@ -290,60 +280,66 @@ def fn_orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellati
     }
 
 
-def _postProcessPacking(objBin):
+def _fnPostProcessPacking(objBin):
     """
-    This function applies gravity and boundary enforcement for physical realism.
+    Applies simple "gravity" and boundary enforcement to the final packing solution.
+    The `py3dbp` library sometimes leaves small gaps or places items slightly outside
+    the container boundaries. This function corrects those issues to create a more
+    physically realistic visualization for the user.
+
+    Args:
+        objBin (Bin): The bin object containing the final packed items.
     """
     print("Starting packing post-processing for physical realism...")
     
     list_items = objBin.items
-    # Using floor for bin dimensions ensures we use integer math for boundaries.
     bin_dims = [np.floor(float(objBin.width)), np.floor(float(objBin.height)), np.floor(float(objBin.depth))]
     
-    # Stage 1: Iterative Gravity Simulation to "settle" items.
-    # We loop multiple times to ensure items stack correctly.
-    for _ in range(3): # Iterate three times to settle complex stacks.
+    # --- Stage 1: Iterative Gravity Simulation ---
+    # We loop multiple times to allow items to "settle" on top of each other correctly.
+    # An item placed on top of two smaller items might need a second pass to settle further.
+    for _ in range(3): # Three passes are usually sufficient for most configurations.
         items_moved = 0
-        list_items.sort(key=lambda item: float(item.position[1]))
+        list_items.sort(key=lambda item: float(item.position[1])) # Sort by height (Y-axis).
         
         for i, obj_item in enumerate(list_items):
             flt_ix, flt_iy, flt_iz = [float(p) for p in obj_item.position]
             flt_iw, flt_ih, flt_id = [float(d) for d in obj_item.get_dimension()]
             
-            flt_supportHeight = 0.0
+            flt_supportHeight = 0.0 # Start by assuming it rests on the floor (y=0).
             
-            # Find the highest point of support from all other items.
+            # Find the highest point of support from all OTHER items below it.
             for j, obj_otherItem in enumerate(list_items):
                 if i == j: continue
-                
                 flt_ox, flt_oy, flt_oz = [float(p) for p in obj_otherItem.position]
                 flt_ow, flt_oh, flt_od = [float(d) for d in obj_otherItem.get_dimension()]
                 
                 bln_x_overlap = (flt_ix < flt_ox + flt_ow) and (flt_ox < flt_ix + flt_iw)
                 bln_z_overlap = (flt_iz < flt_oz + flt_od) and (flt_oz < flt_iz + flt_id)
 
+                # If another item is below this one and overlaps in the X-Z plane, it provides support.
                 if bln_x_overlap and bln_z_overlap and (flt_oy + flt_oh <= flt_iy + 0.1):
                     flt_supportHeight = max(flt_supportHeight, flt_oy + flt_oh)
 
+            # If the item is "floating," move it down to its support height.
             if flt_iy > flt_supportHeight:
                 obj_item.position[1] = str(flt_supportHeight)
                 items_moved += 1
         
         if items_moved == 0:
             print("Item stack has settled.")
-            break
+            break # If a full pass moves no items, gravity has been fully applied.
 
-    # Stage 2: Enforce strict container boundaries with integer precision.
+    # --- Stage 2: Enforce Container Boundaries ---
+    # This step ensures no part of any item is visually outside the container wireframe.
     for obj_item in list_items:
         pos = [float(p) for p in obj_item.position]
         dims = [float(d) for d in obj_item.get_dimension()]
         
-        # Check and clamp each axis (X, Y, Z).
-        for axis in range(3):
-            if pos[axis] < 0: pos[axis] = 0
-            # Ensure the top/far edge of the item is inside the boundary.
+        for axis in range(3): # Check X, Y, and Z axes.
+            if pos[axis] < 0: pos[axis] = 0 # Clamp to the floor/walls.
             if pos[axis] + dims[axis] > bin_dims[axis]:
-                pos[axis] = bin_dims[axis] - dims[axis]
+                pos[axis] = bin_dims[axis] - dims[axis] # Clamp to the ceiling/far walls.
         
         obj_item.position = [str(p) for p in pos]
         

@@ -99,12 +99,15 @@ def fnGetAllVehicleCapacities():
     # Extract the unique, non-null capacity values.
     arr_capacities = obj_dfRouteData['executor_capacity_cm3'].dropna().unique()
 
-    # This is a critical memory management step. After we have the information we need,
-    # we explicitly delete the large object and ask the garbage collector to reclaim the memory.
-    del obj_dfRouteData
-    gc.collect()
+    # --- PERFORMANCE OPTIMIZATION ---
+    # The following memory management lines have been commented out.
+    # This keeps the large dataframe in memory longer, avoiding the overhead of
+    # garbage collection, which is part of the strategy to trade memory for speed.
+    #
+    # del obj_dfRouteData
+    # gc.collect()
 
-    print("Memory released after fetching capacities.")
+    print("Memory NOT explicitly released after fetching capacities.")
     # Return a sorted list of the capacities.
     return sorted([float(c) for c in arr_capacities])
 
@@ -212,10 +215,14 @@ def _fnGetOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFA
         json.dump(dict_dataToCache, f)
     print(f"Successfully created smart cache: {str_cacheFilename}")
 
-    # Finally, release the memory consumed by the large source dataframes.
-    del obj_dfRouteDataCache, dict_packageDataCache, arr_allPackagesInfo
-    gc.collect()
-    print("Memory from large JSON files has been successfully released.")
+    # --- PERFORMANCE OPTIMIZATION ---
+    # The following memory management lines have been commented out to keep the
+    # large source dataframes in memory. This uses more RAM but avoids the
+    # performance cost of deleting large objects and running the garbage collector.
+    #
+    # del obj_dfRouteDataCache, dict_packageDataCache, arr_allPackagesInfo
+    # gc.collect()
+    print("Memory from large JSON files has NOT been successfully released.")
 
     return dict_dataToCache
 

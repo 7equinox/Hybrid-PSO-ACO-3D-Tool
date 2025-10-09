@@ -31,7 +31,7 @@ from .base_algorithm import creator # Imports the custom Fitness and Particle st
 from backend.simulation.custom_exceptions import CancelledException # For graceful cancellation.
 
 
-def fnRunPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag, dictProgressTracker,
+def fnRunPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag, dictProgressTracker, pool=None,
                        intNumParticles=10, intMaxGenerations=10):
     """
     Executes the complete standalone Particle Swarm Optimization algorithm, from
@@ -44,6 +44,7 @@ def fnRunPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
         funcEvaluateSolution (function): The shared fitness evaluation function from the orchestrator.
         dictCancellationFlag (dict): The shared flag to check for user-initiated cancellation.
         dictProgressTracker (dict): A shared dictionary to report real-time progress to the UI.
+        pool (multiprocessing.Pool, optional): A pool of worker processes for parallel evaluation. Defaults to None.
         intNumParticles (int): The number of particles in the swarm (i.e., the population size).
         intMaxGenerations (int): The number of iterations the algorithm will run (the stopping condition).
 
@@ -72,8 +73,14 @@ def fnRunPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
     # "population" will create a list of particles, giving us our full swarm.
     obj_toolbox.register("population", tools.initRepeat, list, obj_toolbox.particle)
 
-    # Register the core evolutionary functions with DEAP's toolbox for easy calling.
+    # --- MODIFIED: Register the evaluation and mapping functions ---
+    # The evaluation function is now passed in from the orchestrator.
+    # If a multiprocessing pool is provided, we register its `map` function to enable parallel evaluation.
     obj_toolbox.register("evaluate", funcEvaluateSolution)
+    if pool:
+        obj_toolbox.register("map", pool.map)
+    # --- END OF MODIFICATION ---
+    
     obj_toolbox.register("update", _fnUpdateParticle, phi1=2.0, phi2=2.0, phi3=1.5,
                          service_times=arr_serviceTimes)
 
@@ -89,37 +96,38 @@ def fnRunPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
             if dictCancellationFlag['is_cancelled']: raise CancelledException()
             print(f"PSO Generation: {gen + 1}/{intMaxGenerations}")
 
-            for obj_particle in list_swarm:
-                # --- EVALUATE FITNESS & UPDATE PERSONAL BEST (pBest) ---
-                # Each particle's fitness (its quality) is calculated using the shared evaluation
-                # function if it hasn't been evaluated already.
-                if not obj_particle.fitness.valid:
-                    obj_particle.fitness.values = funcEvaluateSolution(obj_particle)
+            # --- MODIFIED: Parallel Fitness Evaluation ---
+            # Instead of a loop, we map the evaluation function over the entire swarm.
+            # If a pool is registered, this happens in parallel. Otherwise, it's sequential.
+            # We filter for particles that have an invalid fitness to avoid re-evaluation.
+            invalid_particles = [p for p in list_swarm if not p.fitness.valid]
+            if invalid_particles:
+                if hasattr(obj_toolbox, 'map'):
+                    fitnesses = obj_toolbox.map(obj_toolbox.evaluate, invalid_particles)
+                else: # Fallback for single-core execution
+                    fitnesses = map(obj_toolbox.evaluate, invalid_particles)
 
-                # Each particle has a "memory" of the best position it has personally visited.
-                # If its current position is better than its memory, it updates its memory.
-                # This corresponds to the "Evaluate Personal Best (pBest)" step in the flowchart.
+                for part, fit in zip(invalid_particles, fitnesses):
+                    part.fitness.values = fit
+            # --- END OF MODIFICATION ---
+
+            # After evaluation, we loop through the now-updated swarm to update personal and global bests.
+            # This part is fast and runs sequentially.
+            for obj_particle in list_swarm:
+                # --- UPDATE PERSONAL BEST (pBest) ---
                 if not obj_particle.pbest or obj_particle.pbest.fitness < obj_particle.fitness:
                     obj_particle.pbest = creator.Particle(obj_particle)
                     obj_particle.pbest.fitness.values = obj_particle.fitness.values
 
                 # --- UPDATE GLOBAL BEST (gBest) ---
-                # The Global Best for the entire swarm is updated if the current particle's
-                # fitness is better than any fitness seen so far across ALL particles. This
-                # represents the collective knowledge of the swarm. This corresponds to the
-                # "Assign pBest to Global Best (gBest)" step in the flowchart.
                 if not obj_gbest or obj_gbest.fitness < obj_particle.fitness:
                     obj_gbest = creator.Particle(obj_particle)
                     obj_gbest.fitness.values = obj_particle.fitness.values
 
             # --- COMPUTE VELOCITY AND UPDATE PARTICLE POSITION ---
-            # After every particle in the swarm has been evaluated, they are all updated.
-            # Each particle's new position is determined by its velocity, which is influenced
-            # by its own experience (pBest) and the swarm's collective experience (gBest).
-            # This is the "Compute Velocity" and "Update particle position" step.
+            # This is also a fast, sequential operation.
             for obj_particle in list_swarm:
                 obj_toolbox.update(obj_particle, obj_gbest)
-            # The loop then repeats for the next generation.
 
     except CancelledException:
         # This block ensures a graceful exit if the user cancels the simulation.

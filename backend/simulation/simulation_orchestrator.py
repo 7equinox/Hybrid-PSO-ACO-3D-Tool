@@ -29,6 +29,7 @@ import random       # For random sampling and other stochastic processes in the 
 import numpy as np  # A powerful library for numerical operations, used here for statistical calculations.
 from memory_profiler import memory_usage # A specialized tool for measuring peak RAM usage.
 from py3dbp import Packer, Bin, Item # The core library for performing the 3D bin packing simulation.
+import functools    # --- ADDED: For using partial functions with multiprocessing.
 
 
 # --- Import Custom Application Modules ---
@@ -40,7 +41,54 @@ from backend.algorithms.aco_algorithm import fnRunAcoAlgorithm
 from backend.algorithms.hybrid_pso_aco_algorithm import fnRunHybridPsoAcoAlgorithm
 
 
-def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled, dictProgressTracker):
+# --- ADDED: Top-Level Evaluation function for Parallel Processing ---
+def _topLevelEvaluateSolution(arrItemOrderIndices, arr_itemsToPack, obj_bin, arr_packagesToLoad):
+    """
+    A stateless, top-level version of the fitness evaluation function that can be
+    pickled and used by multiprocessing workers. It does NOT use caching or
+    cancellation checks for simplicity and process safety. The performance gain from
+    parallelism is expected to far outweigh the loss of caching for this problem.
+
+    Args:
+        arrItemOrderIndices (tuple): A specific packing order to evaluate.
+        arr_itemsToPack (list): List of py3dbp 'Item' objects.
+        obj_bin (Bin): The py3dbp 'Bin' object representing the vehicle.
+        arr_packagesToLoad (list): List of package dictionaries with metadata.
+
+    Returns:
+        tuple: A tuple containing the multi-objective fitness scores for the solution.
+    """
+    obj_packer = Packer()
+    obj_freshBin = Bin(obj_bin.name, obj_bin.width, obj_bin.height, obj_bin.depth, obj_bin.max_weight)
+    obj_packer.add_bin(obj_freshBin)
+
+    # Use the provided item order to add items to the packer
+    for int_i in arrItemOrderIndices:
+        obj_packer.add_item(arr_itemsToPack[int_i])
+
+    # This is the core packing simulation.
+    obj_packer.pack(bigger_first=True, distribute_items=True, number_of_decimals=0)
+
+    arr_packedItems = obj_packer.bins[0].items
+    if not arr_packedItems:
+        # Worst possible fitness score for a solution that packs nothing.
+        return (0, float('inf'), float('inf'))
+    else:
+        # Delegate the calculation of all metrics to the dedicated performance_metrics module.
+        dict_metrics = fnCalculateAllMetrics(arr_packedItems, obj_bin.get_volume(), arr_packagesToLoad)
+        
+        # Penalize infeasible solutions.
+        if dict_metrics['unloading_feasibility'] == 'Infeasible':
+            return (0, float('inf'), float('inf'))
+        else:
+            # Return the multi-objective fitness tuple.
+            return (
+                dict_metrics['volume_utilization'],
+                dict_metrics['relocation_count'],
+                dict_metrics['unloading_sequence_length']
+            )
+
+def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled, dictProgressTracker, pool=None):
     """
     This is the main, overarching function for a single experimental run. It orchestrates
     the entire process from data loading to algorithm execution and result consolidation,
@@ -52,6 +100,7 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         dictCancellationFlag (dict): The shared flag for checking user-initiated cancellations.
         blnIsDynamicConstraintEnabled (bool): Flag for applying the dynamic constraint.
         dictProgressTracker (dict): A shared dictionary to report real-time progress to the UI.
+        pool (multiprocessing.Pool, optional): A pool of worker processes for parallel execution. Defaults to None.
 
     Returns:
         dict: A comprehensive dictionary containing all metrics and results of the simulation.
@@ -149,60 +198,62 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         1e6 # Max weight is set very high, as our problem is volume-constrained, not weight-constrained.
     )
 
-    # --- Performance Optimization: Fitness Caching ---
-    # The most expensive part of the simulation is evaluating the quality of a solution. To
-    # speed things up, we use a cache (a dictionary). If an algorithm tries to re-evaluate the
-    # same packing order, we return the cached result instantly instead of re-running the
-    # entire complex packing and unloading simulation. This is a form of memoization.
-    dict_fitnessCache = {}
+    # --- MODIFIED: Select Evaluation Strategy (Parallel vs. Single-Core) ---
+    # We choose which evaluation function to pass to the algorithm based on whether
+    # a multiprocessing pool was provided.
+    func_algorithm_evaluator = None
 
-    # --- The Fitness Function (Directly Answering Research Questions 1 & 2) ---
-    # This single function is the heart of the evaluation process. It takes a potential solution
-    # (a specific packing order) from an algorithm and calculates its quality based on our key
-    # research metrics: Volume Utilization, Relocation Count, Unloading Feasibility, and Sequence Length.
-    # By using this exact same function to judge all three algorithms, we ensure a fair,
-    # unbiased, and scientifically sound comparison. This directly addresses the Statement of the Problem.
-    def fnEvaluateSolution(arrItemOrderIndices):
-        tpl_solutionKey = tuple(arrItemOrderIndices) # Convert to tuple to use as a dictionary key.
-        if tpl_solutionKey in dict_fitnessCache:
-            return dict_fitnessCache[tpl_solutionKey] # Return cached result if available.
+    if pool:
+        print("Parallel processing enabled. Fitness caching and in-generation cancellation will be disabled.")
+        # We use functools.partial to "bake in" the data arguments. This creates a simple
+        # callable that only needs the 'arrItemOrderIndices' argument, which is what the
+        # algorithms' mapping functions expect. This is essential for it to be pickleable.
+        func_algorithm_evaluator = functools.partial(_topLevelEvaluateSolution,
+                                                     arr_itemsToPack=arr_itemsToPack,
+                                                     obj_bin=obj_bin,
+                                                     arr_packagesToLoad=arr_packagesToLoad)
+    else:
+        # --- The original single-core evaluation function with caching and cancellation ---
+        print("Single-core processing enabled. Fitness caching and cancellation are active.")
+        dict_fitnessCache = {}
+        # This single function is the heart of the evaluation process. It takes a potential solution
+        # and calculates its quality based on our key research metrics.
+        def fnEvaluateSolution(arrItemOrderIndices):
+            tpl_solutionKey = tuple(arrItemOrderIndices) # Convert to tuple to use as a dictionary key.
+            if tpl_solutionKey in dict_fitnessCache:
+                return dict_fitnessCache[tpl_solutionKey] # Return cached result if available.
 
-        if dictCancellationFlag['is_cancelled']:
-            raise CancelledException()
+            if dictCancellationFlag['is_cancelled']:
+                raise CancelledException()
 
-        obj_packer = Packer()
-        obj_freshBin = Bin(obj_bin.name, obj_bin.width, obj_bin.height, obj_bin.depth, obj_bin.max_weight)
-        obj_packer.add_bin(obj_freshBin)
+            obj_packer = Packer()
+            obj_freshBin = Bin(obj_bin.name, obj_bin.width, obj_bin.height, obj_bin.depth, obj_bin.max_weight)
+            obj_packer.add_bin(obj_freshBin)
 
-        for int_i in arrItemOrderIndices:
-            obj_packer.add_item(arr_itemsToPack[int_i]) # Add items in the proposed order.
-        
-        # This is the core packing simulation. The `distribute_items=True` parameter is
-        # crucial as it allows the library to rotate items to find a denser fit.
-        obj_packer.pack(bigger_first=True, distribute_items=True, number_of_decimals=0)
-
-        arr_packedItems = obj_packer.bins[0].items
-        if not arr_packedItems:
-            # If a solution results in no items being packed, it's given the worst possible fitness score.
-            tpl_fitness = (0, float('inf'), float('inf'))
-        else:
-            # Delegate the calculation of all metrics to the dedicated performance_metrics module.
-            dict_metrics = fnCalculateAllMetrics(arr_packedItems, obj_bin.get_volume(), arr_packagesToLoad)
+            for int_i in arrItemOrderIndices:
+                obj_packer.add_item(arr_itemsToPack[int_i]) # Add items in the proposed order.
             
-            # An 'Infeasible' solution (one with unloading deadlocks) is heavily penalized.
-            # This guides the algorithms away from such operationally disastrous arrangements.
-            if dict_metrics['unloading_feasibility'] == 'Infeasible':
+            obj_packer.pack(bigger_first=True, distribute_items=True, number_of_decimals=0)
+
+            arr_packedItems = obj_packer.bins[0].items
+            if not arr_packedItems:
                 tpl_fitness = (0, float('inf'), float('inf'))
             else:
-                # This tuple represents the multi-objective fitness of the solution.
-                tpl_fitness = (
-                    dict_metrics['volume_utilization'],
-                    dict_metrics['relocation_count'],
-                    dict_metrics['unloading_sequence_length']
-                )
+                dict_metrics = fnCalculateAllMetrics(arr_packedItems, obj_bin.get_volume(), arr_packagesToLoad)
+                if dict_metrics['unloading_feasibility'] == 'Infeasible':
+                    tpl_fitness = (0, float('inf'), float('inf'))
+                else:
+                    tpl_fitness = (
+                        dict_metrics['volume_utilization'],
+                        dict_metrics['relocation_count'],
+                        dict_metrics['unloading_sequence_length']
+                    )
+            
+            dict_fitnessCache[tpl_solutionKey] = tpl_fitness # Cache the result before returning.
+            return tpl_fitness
         
-        dict_fitnessCache[tpl_solutionKey] = tpl_fitness # Cache the result before returning.
-        return tpl_fitness
+        func_algorithm_evaluator = fnEvaluateSolution
+    # --- END OF MODIFICATION ---
 
     # --- Stage 4: Algorithm Selection and Execution ---
     # A mapping dictionary to select the correct algorithm function based on the user's choice.
@@ -219,9 +270,9 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     # for evaluating the scalability and resource efficiency of each algorithm.
     dictProgressTracker['message'] = "Running optimization..."
     tm_startTime = time.time()
-    # The `memory_usage` function calls our algorithm and returns both the memory usage and the algorithm's own return values.
+    # --- MODIFIED: Pass both the evaluator function and the pool to the algorithm ---
     flt_memUsage, (arr_bestSolutionIndices, tpl_bestFitness) = memory_usage(
-        (func_algorithm, (arr_itemsToPack, arr_packagesToLoad, fnEvaluateSolution, dictCancellationFlag, dictProgressTracker)),
+        (func_algorithm, (arr_itemsToPack, arr_packagesToLoad, func_algorithm_evaluator, dictCancellationFlag, dictProgressTracker, pool)),
         retval=True, max_usage=True, interval=0.1
     )
     flt_computationTime = round(time.time() - tm_startTime, 2)

@@ -29,7 +29,7 @@ import numpy as np
 from backend.simulation.custom_exceptions import CancelledException # For graceful cancellation.
 
 
-def fnRunAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag, dictProgressTracker,
+def fnRunAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag, dictProgressTracker, pool=None,
                        intNumAnts=10, intMaxGenerations=10,
                        fltAlpha=1.0, fltBeta=2.0, fltEvaporationRate=0.5):
     """
@@ -43,6 +43,7 @@ def fnRunAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
         funcEvaluateSolution (function): The shared fitness evaluation function from the orchestrator.
         dictCancellationFlag (dict): The shared flag for checking user-initiated cancellation.
         dictProgressTracker (dict): A shared dictionary to report real-time progress to the UI.
+        pool (multiprocessing.Pool, optional): A pool of worker processes for parallel evaluation. Defaults to None.
         intNumAnts (int): The number of ants in the colony for each generation.
         intMaxGenerations (int): The number of iterations for the optimization loop.
         fltAlpha (float): The weighting factor for the influence of the pheromone trail.
@@ -73,6 +74,9 @@ def fnRunAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
     # Variables to track the best solution found across the entire history of the run.
     arr_bestSolutionEver = []
     tpl_bestFitnessEver = (0, float('inf'), float('inf'))
+    
+    # --- MODIFIED: Select mapping function for parallel or sequential execution ---
+    map_func = pool.map if pool else map
 
     # --- ITERATIVE OPTIMIZATION LOOP (The main cycle of the ACO Flowchart) ---
     try:
@@ -82,49 +86,40 @@ def fnRunAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
             if dictCancellationFlag['is_cancelled']: raise CancelledException()
             print(f"ACO Generation: {gen + 1}/{intMaxGenerations}")
 
-            arr_allAntSolutions = []
-            # --- ANTS CONSTRUCT SOLUTIONS (Corresponds to "Ants traverse random paths") ---
-            # In each generation, a new population of "ants" independently constructs solutions.
-            # Unlike PSO where solutions are modified, here they are built from scratch, step-by-step.
-            for _ in range(intNumAnts):
-                # An ant constructs a full solution (a path/permutation).
-                arr_solution = _fnConstructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, fltAlpha, fltBeta, dictCancellationFlag)
-                if not arr_solution: continue # Skip if solution construction was cancelled.
-
-                # The constructed solution's quality is then evaluated using the universal fitness function.
-                tpl_fitness = funcEvaluateSolution(arr_solution)
-                arr_allAntSolutions.append((arr_solution, tpl_fitness))
-
-                # Update the overall best-so-far solution found across the entire run.
-                # A proper multi-objective check is used: prioritize better volume, then fewer relocations for ties.
+            # --- MODIFIED: Construct all solutions first, then evaluate in parallel ---
+            # Stage 1: All ants construct their solutions sequentially. This is a fast process.
+            arr_allAntPaths = [_fnConstructSolution(mtr_pheromones, arr_heuristicInfo, int_numItems, fltAlpha, fltBeta, dictCancellationFlag) for _ in range(intNumAnts)]
+            
+            # Stage 2: Evaluate all constructed solutions in a single batch.
+            # If a multiprocessing pool is provided, this step runs in parallel across all available CPU cores.
+            arr_fitnesses = list(map_func(funcEvaluateSolution, arr_allAntPaths))
+            
+            # Stage 3: Combine paths and fitnesses, and update the best-ever solution. This is fast.
+            arr_allAntSolutions = zip(arr_allAntPaths, arr_fitnesses)
+            
+            for arr_solution, tpl_fitness in arr_allAntSolutions:
+                 # Update the overall best-so-far solution found across the entire run.
                 is_better = (tpl_fitness[0] > tpl_bestFitnessEver[0]) or \
                             (tpl_fitness[0] == tpl_bestFitnessEver[0] and tpl_fitness[1] < tpl_bestFitnessEver[1])
                 if is_better:
                     arr_bestSolutionEver = arr_solution
                     tpl_bestFitnessEver = tpl_fitness
-
+            # --- END OF MODIFICATION ---
+            
             # --- UPDATE PHEROMONE TRAIL (The "learning" step of ACO) ---
-            # This is where the collective memory of the swarm is updated based on the
-            # experiences of the ants in the current generation. It consists of two stages:
+            # This part is unchanged and runs sequentially after all evaluations are complete.
 
-            # Stage A: Pheromone Evaporation (Corresponds to "Evaporate pheromones")
-            # All pheromone trails are slightly reduced. This is a crucial step that prevents
-            # the colony from getting stuck on a single, suboptimal path too early. It allows the
-            # system to "forget" older, potentially less promising paths, encouraging exploration.
+            # Stage A: Pheromone Evaporation
             mtr_pheromones *= (1 - fltEvaporationRate)
 
-            # Stage B: Pheromone Deposition (Corresponds to "Deposit pheromones")
-            # The paths that were part of the high-quality solutions found in this generation
-            # are reinforced. Ants "deposit" more pheromones on these successful trails, making them
-            # more attractive and more likely to be chosen by ants in future generations.
-            for arr_solution, tpl_fitness in arr_allAntSolutions:
-                # The amount of pheromone deposited is proportional to the solution's quality (its Volume Utilization).
+            # Stage B: Pheromone Deposition
+            # We re-zip the lists for deposition
+            arr_allAntSolutions_for_deposit = zip(arr_allAntPaths, arr_fitnesses)
+            for arr_solution, tpl_fitness in arr_allAntSolutions_for_deposit:
                 flt_pheromoneDeposit = tpl_fitness[0]
                 if flt_pheromoneDeposit > 0:
-                    # For each step in the successful path, reinforce the connection.
                     for i in range(int_numItems - 1):
                         mtr_pheromones[arr_solution[i]][arr_solution[i+1]] += flt_pheromoneDeposit
-            # The loop then repeats for the next generation.
 
     except CancelledException:
         print("ACO algorithm was cancelled.")

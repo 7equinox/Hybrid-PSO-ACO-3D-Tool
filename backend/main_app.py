@@ -25,6 +25,7 @@ import os        # Used for interacting with the operating system, like finding 
 import sys       # Allows manipulation of Python's runtime environment, like modifying the path.
 import uuid      # Used to generate unique identifiers for each simulation and data-loading job.
 from threading import Thread, Lock # The fundamental tools for running tasks in the background.
+import multiprocessing # --- ADDED: For leveraging multiple CPU cores to accelerate simulations ---
 
 
 # --- System Path Configuration ---
@@ -91,15 +92,25 @@ def _fnExecuteSimulationInThread(strSimulationId, strAlgorithmName, fltCapacityC
         dict_cancellationFlag = g_dict_runningSimulations[strSimulationId]['cancellation_flag']
         dict_progressTracker = g_dict_runningSimulations[strSimulationId]['progress'] # For real-time UI updates.
 
-        # Delegate the entire complex logic of the experiment to the simulation orchestrator module.
-        # This keeps our main application file clean and focused on web-related tasks.
-        dict_results = fnOrchestrateSimulationRun(
-            strAlgorithmName,
-            fltCapacityCm3,
-            dict_cancellationFlag,
-            blnIsDynamicConstraintEnabled,
-            dict_progressTracker # Pass the progress tracker down into the core simulation logic.
-        )
+        # --- MODIFIED: Parallel Processing Setup ---
+        # To significantly speed up the simulation, we create a pool of worker processes.
+        # This allows fitness evaluations to be spread across multiple CPU cores.
+        # We leave one core free to ensure the main server and OS remain responsive.
+        int_num_cores = max(1, multiprocessing.cpu_count() - 1)
+        print(f"--- Simulation {strSimulationId} starting: Utilizing {int_num_cores} CPU cores for parallel processing. ---")
+        
+        with multiprocessing.Pool(processes=int_num_cores) as pool:
+            # Delegate the entire complex logic of the experiment to the simulation orchestrator module.
+            # We now pass the 'pool' object to be used by the underlying algorithms.
+            dict_results = fnOrchestrateSimulationRun(
+                strAlgorithmName,
+                fltCapacityCm3,
+                dict_cancellationFlag,
+                blnIsDynamicConstraintEnabled,
+                dict_progressTracker, # Pass the progress tracker down into the core simulation logic.
+                pool=pool # --- ADDED: Pass the worker pool to the orchestrator.
+            )
+        # --- END OF MODIFICATION ---
 
         # Once the simulation is complete, we must safely update the global job board.
         # We acquire the lock to ensure no other thread interferes while we write the result.
@@ -360,6 +371,17 @@ def fnHandleCancelSimulationRequest(strSimulationId):
 # This special block of code checks if the script is being run directly.
 # If it is, it starts the Flask development server.
 if __name__ == '__main__':
+    # --- ADDED: Set the start method for multiprocessing ---
+    # This is important for compatibility, especially on macOS and Windows.
+    # 'fork' is generally faster but can be less safe; 'spawn' is more robust.
+    try:
+        multiprocessing.set_start_method("spawn")
+    except RuntimeError:
+        # This will raise a RuntimeError if the start method has already been set.
+        # It's safe to ignore in that case.
+        pass
+    # --- END OF ADDITION ---
+    
     # Starts the web server. `threaded=True` is absolutely essential. It allows Flask
     # to handle multiple requests simultaneously, such as a user clicking "Cancel"
     # while a background thread is running and the frontend is polling for status.

@@ -38,7 +38,7 @@ from .base_algorithm import creator # Imports the shared Fitness and Particle st
 from backend.simulation.custom_exceptions import CancelledException # For graceful cancellation.
 
 
-def fnRunHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag, dictProgressTracker,
+def fnRunHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag, dictProgressTracker, pool=None,
                                 intNumParticles=10, intMaxGenerations=10, fltEvaporationRate=0.2):
     """
     Executes the proposed Pheromone-Augmented Particle Swarm Optimization (PACO) algorithm,
@@ -50,6 +50,7 @@ def fnRunHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, 
         funcEvaluateSolution (function): The shared fitness evaluation function.
         dictCancellationFlag (dict): Shared flag for user-initiated cancellation.
         dictProgressTracker (dict): Shared dictionary for reporting real-time progress.
+        pool (multiprocessing.Pool, optional): A pool of worker processes for parallel evaluation. Defaults to None.
         intNumParticles (int): The size of the particle swarm.
         intMaxGenerations (int): The number of optimization iterations.
         fltEvaporationRate (float): The rate at which pheromone trails decay.
@@ -71,8 +72,13 @@ def fnRunHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, 
     obj_toolbox.register("permutation", random.sample, range(int_numItems), int_numItems)
     obj_toolbox.register("particle", tools.initIterate, creator.Particle, obj_toolbox.permutation)
     obj_toolbox.register("population", tools.initRepeat, list, obj_toolbox.particle)
-    obj_toolbox.register("evaluate", funcEvaluateSolution)
     list_swarm = obj_toolbox.population(n=intNumParticles)
+    
+    # --- MODIFIED: Register evaluation and mapping functions ---
+    obj_toolbox.register("evaluate", funcEvaluateSolution)
+    if pool:
+        obj_toolbox.register("map", pool.map)
+    # --- END OF MODIFICATION ---
     
     # 2. Initialize the ACO component: A pheromone matrix for collective memory.
     mtr_pheromoneMatrix = np.ones((int_numItems, int_numItems))
@@ -90,34 +96,36 @@ def fnRunHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, 
             if dictCancellationFlag['is_cancelled']: raise CancelledException()
             print(f"Hybrid PSO-ACO Generation: {gen + 1}/{intMaxGenerations}")
 
-            # --- Step 1: Evaluate Fitness and Update pBest/gBest (A standard PSO step) ---
-            # This step drives the global exploration aspect of the algorithm. Each particle
-            # evaluates its current solution and updates its personal and the global best memories.
-            # This is identical to the process in the standalone PSO.
+            # --- MODIFIED Step 1: Parallel Fitness Evaluation (A standard PSO step) ---
+            # This step drives the global exploration. All particles are evaluated in parallel
+            # if a multiprocessing pool is available.
+            invalid_particles = [p for p in list_swarm if not p.fitness.valid]
+            if invalid_particles:
+                if hasattr(obj_toolbox, 'map'):
+                    fitnesses = obj_toolbox.map(obj_toolbox.evaluate, invalid_particles)
+                else: # Fallback for single-core
+                    fitnesses = map(obj_toolbox.evaluate, invalid_particles)
+                
+                for part, fit in zip(invalid_particles, fitnesses):
+                    part.fitness.values = fit
+
+            # Sequentially update pBest and gBest after all fitnesses have been calculated.
             for obj_particle in list_swarm:
-                if not obj_particle.fitness.valid:
-                    obj_particle.fitness.values = obj_toolbox.evaluate(obj_particle)
                 if not obj_particle.pbest or obj_particle.pbest.fitness < obj_particle.fitness:
                     obj_particle.pbest = creator.Particle(obj_particle)
                     obj_particle.pbest.fitness.values = obj_particle.fitness.values
                 if not obj_gbest or obj_gbest.fitness < obj_particle.fitness:
                     obj_gbest = creator.Particle(obj_particle)
                     obj_gbest.fitness.values = obj_particle.fitness.values
+            # --- END OF MODIFICATION ---
             
             # --- Step 2: WEIGHTED PHEROMONE UPDATE (The core ACO integration step) ---
-            # This is the crucial feedback mechanism from the hybrid flowchart. Information
-            # discovered by the PSO search is now used to update the ACO's collective memory.
+            # This step is sequential and very fast, so it is not parallelized.
 
-            # Step 2a. Pheromone Evaporation (from ACO): Reduces the influence of old trails to encourage exploration.
+            # Step 2a. Pheromone Evaporation (from ACO)
             mtr_pheromoneMatrix *= (1 - fltEvaporationRate)
             
-            # Step 2b. Elite-Based Pheromone Deposition (from ACO, modified):
-            # This is the 'Weighted Pheromone Update' block in the flowchart. Instead of all
-            # particles/ants depositing pheromones, we use an 'elitist' or 'rank-based'
-            # strategy. Only the best-performing particles (the "elites") in the current
-            # generation are allowed to deposit pheromones. This is a critical refinement that
-            # ensures only high-quality solution components (good item sub-sequences) are
-            # reinforced, preventing mediocre solutions from polluting the collective memory.
+            # Step 2b. Elite-Based Pheromone Deposition (from ACO, modified)
             list_sortedSwarm = sorted(list_swarm, key=lambda p: p.fitness.values[0], reverse=True)
             int_numElites = max(1, int(0.2 * len(list_swarm))) # The top 20% of particles are elites.
 
@@ -129,10 +137,7 @@ def fnRunHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, 
                         mtr_pheromoneMatrix[obj_eliteParticle[i]][obj_eliteParticle[i+1]] += flt_depositAmount
 
             # --- Step 3: Update Particle Velocity with Augmented, Pheromone-Guided Equation ---
-            # Each particle's velocity and position are now updated using the special hybrid function,
-            # which incorporates the newly updated pheromone information as a guiding force.
-            # This step, labeled "Compute velocity with pheromone influence" in the flowchart,
-            # closes the powerful feedback loop between PSO and ACO.
+            # This is also a fast, sequential operation.
             for obj_particle in list_swarm:
                  obj_toolbox.update(obj_particle, obj_gbest)
 

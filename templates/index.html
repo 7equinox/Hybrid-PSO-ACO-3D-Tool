@@ -1,12 +1,12 @@
 <!--
-System Name: Hybrid PSO-ACO 3D Loading Optimization Tool
+System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
 Module Name: Frontend User Interface
 
 Purpose of this file:
-Defines the complete HTML structure for the main user interface. It lays out
-the containers and elements for displaying initial dataset information (left panel)
-and the final simulation results, including all performance metrics (right panel),
-the simulation settings modal, and the loading indicator.
+This file defines the complete HTML structure for the application's main user interface.
+It meticulously lays out all the visual components, including the display panels for
+dataset information and simulation results, the configuration pop-up window (modal),
+and the loading indicators. It serves as the foundational blueprint for what the user sees.
 
 Author/s:
 ALFARO, ABRAM S.
@@ -20,18 +20,21 @@ ESTONILO, JULIUS EVAN C.
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Title updated to the official tool name. -->
     <title>ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)</title>
-    <!-- External Stylesheets -->
+
+    <!-- External Stylesheets for Visual Design -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <!-- Three.js library for 3D visualization capabilities. -->
+    
+    <!-- Three.js Library for 3D Visualization -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
-    <!-- A new header section is created outside the main container -->
-    <!-- This places the title at the top of the entire page. -->
+    <!-- =================================================================
+    MAIN HEADER SECTION
+    Contains the application's primary title and the user guide button.
+    ================================================================== -->
     <header class="main-header">
         <h1>ASPECT</h1>
         <h2>Algorithm System for Packing Efficiency Comparison and Testing</h2>
@@ -41,13 +44,20 @@ ESTONILO, JULIUS EVAN C.
         </div>
     </header>
 
+    <!-- =================================================================
+    MAIN CONTENT CONTAINER
+    Holds the two primary panels of the application interface.
+    ================================================================== -->
     <div class="container">
 
         <!-- =================================================================
-        LEFT SECTION - Displays Initial Dataset Information
+        LEFT PANEL - Initial Dataset Information
+        This section displays the raw data for the selected vehicle before a simulation is run.
         ================================================================== -->
         <div class="left-section">
             <h2 class="dataset-title">2021 Amazon Last Mile Routing Research Challenge Dataset</h2>
+            
+            <!-- Summary Banners for Initial Data -->
             <div class="banners">
                 <div class="white-bg">
                     <p class="label">Vehicle Volume Capacity (cm³)</p>
@@ -67,7 +77,7 @@ ESTONILO, JULIUS EVAN C.
                 </div>
             </div>
 
-            <!-- MODIFIED: Wrapped this section in a .content-block div for consistent spacing. -->
+            <!-- Table for Initial Item Details -->
             <div class="content-block">
                 <p class="label">Selected Items</p>
                 <div class="table white-bg">
@@ -83,7 +93,7 @@ ESTONILO, JULIUS EVAN C.
                             </tr>
                         </thead>
                         <tbody id="initial-item-table-body">
-                            <!-- Rows will be dynamically inserted by JavaScript -->
+                            <!-- Table rows are dynamically inserted here by JavaScript -->
                         </tbody>
                     </table>
                     <p id="initial-no-item" class="no-item">SELECT VEHICLE</p>
@@ -92,18 +102,19 @@ ESTONILO, JULIUS EVAN C.
         </div> <!-- End of left-section -->
 
         <!-- =================================================================
-        RIGHT SECTION - Displays Simulation Results and Metrics
+        RIGHT PANEL - Simulation Results and Metrics
+        This section displays the outcome of the simulation after it completes.
         ================================================================== -->
         <div class="right-section">
 
-            <!-- The "Modify Simulation" button is positioned by CSS in the corner -->
+            <!-- "Modify Simulation" Button -->
             <div id="openModalBtn" class="settings">
                 <i class="fa-solid fa-gear"></i>
                 <p>Modify Simulation</p>
             </div>
             
             <div class="results-panel-content">
-                <!-- This header contains the algorithm and visualize button -->
+                <!-- Header for Algorithm Name and Visualize Button -->
                 <div class="algorithm-header">
                     <div class="algorithm-title-group">
                         <p class="label">Algorithm</p>
@@ -114,6 +125,7 @@ ESTONILO, JULIUS EVAN C.
                     </button>
                 </div>
 
+                <!-- Summary Banners for Simulation Results -->
                 <div class="banners">
                     <div class="gray-bg">
                         <p class="label">Vehicle Volume Capacity (cm³)</p>
@@ -133,8 +145,8 @@ ESTONILO, JULIUS EVAN C.
                     </div>
                 </div>
 
+                <!-- Performance Metrics Display -->
                 <div class="metrics">
-                    <!-- MODIFIED: Wrapped each metrics section for consistent spacing. -->
                     <div class="content-block">
                         <p class="label">Scalability Metrics</p>
                         <div class="metric-info gray-bg">
@@ -171,7 +183,7 @@ ESTONILO, JULIUS EVAN C.
                     </div>
                 </div>
 
-                <!-- MODIFIED: Wrapped this final section for consistent spacing. -->
+                <!-- Table for Final Packed Item Details -->
                 <div class="content-block">
                     <p class="label">Packed Items</p>
                     <div class="table gray-bg">
@@ -187,7 +199,7 @@ ESTONILO, JULIUS EVAN C.
                                 </tr>
                             </thead>
                             <tbody id="result-item-table-body">
-                                <!-- Rows will be dynamically inserted by JavaScript -->
+                                <!-- Table rows are dynamically inserted here by JavaScript -->
                             </tbody>
                         </table>
                         <p id="result-no-item" class="no-item">NO RESULTS</p>
@@ -198,7 +210,8 @@ ESTONILO, JULIUS EVAN C.
     </div> <!-- End of container -->
 
     <!-- =================================================================
-    MODAL - For Simulation Configuration
+    MODAL - Simulation Configuration Pop-up
+    This is hidden by default and appears when the user wants to configure a new simulation.
     ================================================================== -->
     <div id="myModal" class="modal">
         <div class="modal-content">
@@ -209,11 +222,11 @@ ESTONILO, JULIUS EVAN C.
                 <button data-algo="ACO">Ant Colony Optimization</button>
                 <button data-algo="PSO-ACO">PSO-ACO Algorithm</button>
             </div>
+            
             <p class="label">Choose Vehicle Volume Capacity (cm³)</p>
             <div class="custom-select-wrapper">
                 <select id="vehicle-capacity-select" class="currency-select" aria-label="Vehicle Capacity selection:">
                     <option value="" disabled selected>Select Vehicle Capacity</option>
-                    <!-- Options are populated from the backend -->
                     {% for capacity in capacities %}
                     <option value="{{ capacity }}">
                     {% set num = capacity|float %}
@@ -230,7 +243,7 @@ ESTONILO, JULIUS EVAN C.
                 <span class="arrow"></span>
             </div>
 
-            <!-- DYNAMIC CONSTRAINT TOGGLE SWITCH -->
+            <!-- Dynamic Constraint Toggle Switch -->
             <div class="toggle-switch-container">
                 <label for="dynamic-constraint-toggle" class="label">Enable Dynamic Constraint</label>
                 <label class="switch">
@@ -247,7 +260,8 @@ ESTONILO, JULIUS EVAN C.
     </div>
     
     <!-- =================================================================
-    GUIDES MODAL - With highlighted text
+    GUIDES MODAL - User Guide Pop-up
+    This is shown on first load to guide the user.
     ================================================================== -->
     <div id="guidesModal" class="modal" style="display: flex;">
         <div class="modal-content guides-content">
@@ -289,7 +303,8 @@ ESTONILO, JULIUS EVAN C.
 
 
     <!-- =================================================================
-    SPINNER LOADER - For indicating processing status
+    SPINNER LOADER MODAL
+    This modal provides visual feedback during long-running server operations.
     ================================================================== -->
     <div id="loader" class="modal" style="display: none; background: rgba(0, 0, 0, 0.85); color: white; font-size: 24px;">
         <div class="loader-content">
@@ -300,9 +315,10 @@ ESTONILO, JULIUS EVAN C.
         </div>
     </div>
 
-    <!-- Main JavaScript File -->
+    <!-- Core Application Logic -->
     <script src="{{ url_for('static', filename='script.js') }}"></script>
-    <!-- OrbitControls is needed to make the 3D view interactive (zoom, rotate). -->
+    
+    <!-- External script required for 3D visualization controls -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </body>
 </html>

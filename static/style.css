@@ -1,12 +1,12 @@
 /*
-System Name: Hybrid PSO-ACO 3D Loading Optimization Tool
-Module Name: Frontend User Interface
+System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
+Module Name: Frontend User Interface Styles
 
 Purpose of this file:
-Provides all the Cascading Style Sheets (CSS) for the application's user
-interface. This includes layout (flexbox, grid), typography, colors, and
-the styling for all interactive components like modals, buttons, tables,
-and custom dropdowns.
+Provides all the Cascading Style Sheets (CSS) to define the visual appearance of
+the application. This includes rules for layout (flexbox, grid), typography
+(fonts, sizes, colors), and the specific styling for all interactive components
+like modals, buttons, tables, and custom dropdown menus.
 
 Author/s:
 ALFARO, ABRAM S.
@@ -16,7 +16,9 @@ ERFE, JEFFERSON B.
 ESTONILO, JULIUS EVAN C.
 */
 
-/* --- Google Fonts & Global Resets --- */
+/* ==========================================================================
+   1. Google Fonts Import & Global Resets
+   ========================================================================== */
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700&display=swap');
 
 * {
@@ -27,7 +29,9 @@ ESTONILO, JULIUS EVAN C.
 }
 
 
-/* --- Base Typography & Body --- */
+/* ==========================================================================
+   2. Base Typography & Body Styles
+   ========================================================================== */
 body {
     background-color: #f5f5f5;
 }
@@ -46,6 +50,10 @@ h3 {
     color: #e08128;
 }
 
+
+/* ==========================================================================
+   3. Main Layout & Section Styling
+   ========================================================================== */
 .main-header {
     background-color: #121212;
     color: white;
@@ -65,7 +73,6 @@ h3 {
     color: #d1d1d1;
 }
 
-/* --- Main Layout & Sections --- */
 .container {
     display: flex;
     margin: 30px auto; 
@@ -87,7 +94,6 @@ h3 {
     position: relative; 
 }
 
-/* MODIFIED: Reverting to a more standard bottom margin. */
 .dataset-title {
     font-size: 20px;
     font-weight: 700;
@@ -110,19 +116,18 @@ h3 {
 }
 
 
-/* --- Component Styles: Banners & Metrics --- */
+/* ==========================================================================
+   4. Component Styles: Banners, Backgrounds, and Metrics
+   ========================================================================== */
 .banners {
     display: grid;
     gap: 20px;
     grid-template-columns: repeat(2, 1fr);
 }
 
-/* MODIFIED: This is the new, primary rule for ensuring consistent vertical spacing */
-/* between all major content groups in both the left and right panels. */
 .content-block {
     margin-top: 30px;
 }
-
 
 .white-bg {
     background-color: #ffffff;
@@ -139,49 +144,14 @@ h3 {
     padding: 15px;
 }
 
-/* MODIFIED: Margin is now handled by the parent .content-block */
 .metrics {
     display: grid;
     grid-template-columns: repeat(1, 1fr);
-    /* margin-top has been removed. */
 }
 
 .metric-info {
-    margin-top: 10px; /* Added back to give space between label and box */
+    margin-top: 10px;
 }
-
-
-#visualize-btn {
-    display: none; 
-    align-items: center;
-    gap: 8px;
-    background-color: #e08128;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-weight: 500;
-    font-size: 14px;
-    cursor: pointer;
-    transition: background-color 0.2s;
-    height: 40px;
-    white-space: nowrap;
-}
-
-#visualize-btn i {
-    font-size: 16px;
-}
-
-#visualize-btn:hover {
-    background-color: #90541c;
-}
-
-#visualize-btn:disabled {
-    background-color: #555;
-    cursor: not-allowed;
-    color: #999;
-}
-
 
 .metric-item {
     align-items: center;
@@ -189,6 +159,10 @@ h3 {
     justify-content: space-between;
 }
 
+
+/* ==========================================================================
+   5. Component Styles: Buttons & Interactive Elements
+   ========================================================================== */
 .settings {
     align-items: center;
     background-color: #343434;
@@ -227,7 +201,38 @@ h3 {
     color: #e08128;
 }
 
-/* --- Component Styles: Tables --- */
+#visualize-btn {
+    display: none; 
+    align-items: center;
+    gap: 8px;
+    background-color: #e08128;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-weight: 500;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    height: 40px;
+    white-space: nowrap;
+}
+#visualize-btn i {
+    font-size: 16px;
+}
+#visualize-btn:hover {
+    background-color: #90541c;
+}
+#visualize-btn:disabled {
+    background-color: #555;
+    cursor: not-allowed;
+    color: #999;
+}
+
+
+/* ==========================================================================
+   6. Component Styles: Tables
+   ========================================================================== */
 .table {
     margin-top: 10px;
     max-height: 725px;
@@ -269,7 +274,6 @@ td:not(:first-child) {
     padding: 8px;
 }
 
-/* Remove borders on table edges for a cleaner look */
 .custom-table tr:first-child th { border-top: none; }
 .custom-table tr:last-child td { border-bottom: none; }
 .custom-table th:first-child, .custom-table td:first-child { border-left: none; }
@@ -277,7 +281,9 @@ td:not(:first-child) {
 .custom-table.gray-border th, .custom-table.gray-border td { border-color: #f5f5f5; }
 
 
-/* --- Component Styles: Modals --- */
+/* ==========================================================================
+   7. Component Styles: Modals (Pop-up Windows)
+   ========================================================================== */
 .modal {
     align-items: center;
     background: rgba(0, 0, 0, 0.7);
@@ -319,7 +325,9 @@ td:not(:first-child) {
 }
 
 
-/* --- Modal Content: Options, Selects, Buttons --- */
+/* ==========================================================================
+   8. Modal Content: Options, Selects, and Buttons
+   ========================================================================== */
 .modal-options {
     display: grid;
     gap: 20px;
@@ -387,17 +395,16 @@ select.currency-select {
     pointer-events: none;
 }
 
-
 select.currency-select option {
     font-size: 16px;
     font-weight: 500;
     padding: 10px 15px;
     color: #121212;
     background-color: #ffffff;
-    
-    &:nth-child(even) {
-        background: #dedede;
-    }
+}
+
+select.currency-select option:nth-child(even) {
+    background: #dedede;
 }
 
 select.currency-select option:hover {
@@ -443,7 +450,9 @@ select.currency-select option:hover {
 }
 
 
-/* --- DYNAMIC CONSTRAINT TOGGLE SWITCH STYLES --- */
+/* ==========================================================================
+   9. Component Styles: Dynamic Constraint Toggle Switch
+   ========================================================================== */
 .toggle-switch-container {
     display: flex;
     justify-content: space-between;
@@ -506,7 +515,9 @@ input:checked + .slider:before {
 }
 
 
-/* --- GUIDES MODAL STYLES --- */
+/* ==========================================================================
+   10. Component Styles: User Guides Modal
+   ========================================================================== */
 .guides-content {
     max-width: 1200px;
     text-align: left;
@@ -551,15 +562,15 @@ input:checked + .slider:before {
 .got-it-btn:hover {
     background-color: #90541c !important;
 }
-
 .guides-content .highlight-text {
     color: #e08128;
     font-weight: 500;
 }
 
 
-/* --- Utility & Custom Components --- */
-/* Loader Spinner */
+/* ==========================================================================
+   11. Utility Styles: Loader and Custom Scrollbars
+   ========================================================================== */
 .loader-content {
     display: flex;
     flex-direction: column;
@@ -567,7 +578,6 @@ input:checked + .slider:before {
     justify-content: center;
 }
 
-/* Scrollbar Styles */
 .table::-webkit-scrollbar { width: 8px; height: 8px; }
 .table::-webkit-scrollbar-track { background-color: #f5f5f5; border-radius: 10px; }
 .table::-webkit-scrollbar-thumb { background-color: #555555; border-radius: 10px; }

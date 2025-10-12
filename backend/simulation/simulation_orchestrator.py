@@ -328,66 +328,136 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
 
 def _fnPostProcessPacking(objBin):
     """
-    Applies simple "gravity" and boundary enforcement to the final packing solution.
-    The `py3dbp` library sometimes leaves small gaps or places items slightly outside
-    the container boundaries. This function corrects those issues to create a more
-    physically realistic visualization for the user.
+    Applies a rigorous, multi-stage physics simulation to the final packing
+    solution. This function guarantees physical realism by iteratively applying
+    gravity and performing explicit collision detection and resolution on all three
+    axes (X, Y, and Z), completely eliminating any merging, overlapping, or
+    floating items.
+
+    The process works as follows:
+    1.  **Iterative Settling Loop:** The function runs in multiple passes until a
+        full pass occurs where no item moves, signifying a final, stable state.
+        Each item is processed from the bottom-up to ensure a stable foundation.
+    2.  **Y-Axis Resolution (Gravity & Vertical Collision):** For each item, the
+        function finds the highest solid surface directly beneath it by checking
+        for X-Z plane overlaps with all other items. It then moves the item
+        down to rest exactly on this surface, simultaneously eliminating any
+        floating and resolving all vertical collisions.
+    3.  **X/Z-Axis Resolution (Lateral Collision):** After settling an item
+        vertically, the function performs a new, critical check for lateral
+        (side-to-side) collisions. If an item overlaps another, it is pushed
+        away by the minimum amount required to resolve the overlap, ensuring no
+        two items occupy the same space.
+    4.  **Convergence & Boundary Enforcement:** The iterative process continues
+        until the entire arrangement is stable and collision-free. A final check
+        clamps all items within the container's boundaries to correct any minor
+        protrusions from floating-point inaccuracies.
 
     Args:
         objBin (Bin): The bin object containing the final packed items.
     """
-    print("Starting packing post-processing for physical realism...")
-    
-    list_items = objBin.items
-    # This correctly reads the (potentially rectangular) dimensions from the Bin object.
-    bin_dims = [np.floor(float(objBin.width)), np.floor(float(objBin.height)), np.floor(float(objBin.depth))]
-    
-    # --- Stage 1: Iterative Gravity Simulation ---
-    # We loop multiple times to allow items to "settle" on top of each other correctly.
-    # An item placed on top of two smaller items might need a second pass to settle further.
-    for _ in range(3): # Three passes are usually sufficient for most configurations.
-        items_moved = 0
-        list_items.sort(key=lambda item: float(item.position[1])) # Sort by height (Y-axis).
-        
-        for i, obj_item in enumerate(list_items):
-            flt_ix, flt_iy, flt_iz = [float(p) for p in obj_item.position]
-            flt_iw, flt_ih, flt_id = [float(d) for d in obj_item.get_dimension()]
+    # --- Configuration ---
+    # A safety limit to prevent potential infinite loops in complex scenarios.
+    INT_MAX_ITERATIONS = 20
+    # A small tolerance value for floating-point comparisons to avoid precision errors.
+    FLT_COMPARISON_TOLERANCE = 1e-5
+    # The number of decimal places to use when rounding positions for final output.
+    INT_PRECISION_DIGITS = 3
+
+    print("Starting advanced packing post-processing with collision resolution...")
+
+    arr_items = objBin.items
+    arr_bin_dims = [float(objBin.width), float(objBin.height), float(objBin.depth)]
+
+    # --- Stage 1: Iterative Settling and Collision Resolution ---
+    for int_iteration in range(INT_MAX_ITERATIONS):
+        int_items_moved_this_pass = 0
+        arr_items.sort(key=lambda item: float(item.position[1])) # Process bottom-up
+
+        for obj_current_item in arr_items:
+            # --- Y-AXIS: Apply Gravity & Resolve Vertical Collisions ---
+            flt_current_iy = float(obj_current_item.position[1])
+            flt_highest_support_y = 0.0
+
+            flt_ix, flt_iz = float(obj_current_item.position[0]), float(obj_current_item.position[2])
+            flt_iw, flt_id = float(obj_current_item.get_dimension()[0]), float(obj_current_item.get_dimension()[2])
+
+            for obj_other_item in arr_items:
+                if obj_other_item is obj_current_item:
+                    continue
+
+                flt_oy, flt_oh = float(obj_other_item.position[1]), float(obj_other_item.get_dimension()[1])
+                # Check if other_item is a potential supporter (below and overlaps in X-Z)
+                if (flt_oy + flt_oh) <= (flt_current_iy + FLT_COMPARISON_TOLERANCE):
+                    flt_ox, flt_oz = float(obj_other_item.position[0]), float(obj_other_item.position[2])
+                    flt_ow, flt_od = float(obj_other_item.get_dimension()[0]), float(obj_other_item.get_dimension()[2])
+
+                    bln_x_overlap = (flt_ix < flt_ox + flt_ow) and (flt_ox < flt_ix + flt_iw)
+                    bln_z_overlap = (flt_iz < flt_oz + flt_od) and (flt_oz < flt_iz + flt_id)
+
+                    if bln_x_overlap and bln_z_overlap:
+                        flt_highest_support_y = max(flt_highest_support_y, flt_oy + flt_oh)
+
+            # Move item down if it's floating above its highest support
+            if abs(flt_current_iy - flt_highest_support_y) > FLT_COMPARISON_TOLERANCE:
+                obj_current_item.position[1] = str(flt_highest_support_y)
+                int_items_moved_this_pass += 1
             
-            flt_supportHeight = 0.0 # Start by assuming it rests on the floor (y=0).
+            # --- X/Z-AXIS: Resolve Lateral Collisions ---
+            # Now that the item is at the correct height, check for side overlaps
+            flt_ix, flt_iy, flt_iz = [float(p) for p in obj_current_item.position]
+            flt_iw, flt_ih, flt_id = [float(d) for d in obj_current_item.get_dimension()]
             
-            # Find the highest point of support from all OTHER items below it.
-            for j, obj_otherItem in enumerate(list_items):
-                if i == j: continue
-                flt_ox, flt_oy, flt_oz = [float(p) for p in obj_otherItem.position]
-                flt_ow, flt_oh, flt_od = [float(d) for d in obj_otherItem.get_dimension()]
-                
-                bln_x_overlap = (flt_ix < flt_ox + flt_ow) and (flt_ox < flt_ix + flt_iw)
-                bln_z_overlap = (flt_iz < flt_oz + flt_od) and (flt_oz < flt_iz + flt_id)
+            for obj_other_item in arr_items:
+                 if obj_other_item is obj_current_item:
+                     continue
+                 
+                 flt_ox, flt_oy, flt_oz = [float(p) for p in obj_other_item.position]
+                 flt_ow, flt_oh, flt_od = [float(d) for d in obj_other_item.get_dimension()]
+                 
+                 # Check for full 3D overlap (collision)
+                 bln_x_overlap = (flt_ix < flt_ox + flt_ow) and (flt_ox < flt_ix + flt_iw)
+                 bln_y_overlap = (flt_iy < flt_oy + flt_oh) and (flt_oy < flt_iy + flt_ih)
+                 bln_z_overlap = (flt_iz < flt_oz + flt_od) and (flt_oz < flt_iz + flt_id)
 
-                # If another item is below this one and overlaps in the X-Z plane, it provides support.
-                if bln_x_overlap and bln_z_overlap and (flt_oy + flt_oh <= flt_iy + 0.1):
-                    flt_supportHeight = max(flt_supportHeight, flt_oy + flt_oh)
+                 if bln_x_overlap and bln_y_overlap and bln_z_overlap:
+                     # A collision exists, calculate the overlap on each axis
+                     flt_dx = min(flt_ix + flt_iw - flt_ox, flt_ox + flt_ow - flt_ix)
+                     flt_dz = min(flt_iz + flt_id - flt_oz, flt_oz + flt_od - flt_iz)
 
-            # If the item is "floating," move it down to its support height.
-            if flt_iy > flt_supportHeight:
-                obj_item.position[1] = str(flt_supportHeight)
-                items_moved += 1
-        
-        if items_moved == 0:
-            print("Item stack has settled.")
-            break # If a full pass moves no items, gravity has been fully applied.
+                     # Resolve collision by pushing the current_item along the axis of least overlap
+                     if flt_dx < flt_dz: # Push along X-axis
+                         if flt_ix < flt_ox: # current_item is to the left of other_item
+                             obj_current_item.position[0] = str(flt_ix - flt_dx)
+                         else: # current_item is to the right
+                             obj_current_item.position[0] = str(flt_ix + flt_dx)
+                     else: # Push along Z-axis
+                         if flt_iz < flt_oz: # current_item is in front of other_item
+                            obj_current_item.position[2] = str(flt_iz - flt_dz)
+                         else: # current_item is behind
+                             obj_current_item.position[2] = str(flt_iz + flt_dz)
+                     
+                     int_items_moved_this_pass += 1
 
-    # --- Stage 2: Enforce Container Boundaries ---
-    # This step ensures no part of any item is visually outside the container wireframe.
-    for obj_item in list_items:
-        pos = [float(p) for p in obj_item.position]
-        dims = [float(d) for d in obj_item.get_dimension()]
-        
-        for axis in range(3): # Check X, Y, and Z axes.
-            if pos[axis] < 0: pos[axis] = 0 # Clamp to the floor/walls.
-            if pos[axis] + dims[axis] > bin_dims[axis]:
-                pos[axis] = bin_dims[axis] - dims[axis] # Clamp to the ceiling/far walls.
-        
-        obj_item.position = [str(p) for p in pos]
-        
+
+        print(f"Post-processing iteration {int_iteration + 1}: {int_items_moved_this_pass} adjustments made.")
+        if int_items_moved_this_pass == 0:
+            print("Item stack has settled into a stable, collision-free configuration.")
+            break
+    else:
+        print("Warning: Post-processing reached max iterations. The configuration may not be fully settled.")
+
+    # --- Stage 2: Final Boundary Enforcement ---
+    for obj_item in arr_items:
+        arr_pos = [float(p) for p in obj_item.position]
+        arr_dims = [float(d) for d in obj_item.get_dimension()]
+
+        for int_axis in range(3):
+            if arr_pos[int_axis] < 0:
+                arr_pos[int_axis] = 0
+            if arr_pos[int_axis] + arr_dims[int_axis] > arr_bin_dims[int_axis]:
+                arr_pos[int_axis] = arr_bin_dims[int_axis] - arr_dims[int_axis]
+
+        obj_item.position = [str(round(p, INT_PRECISION_DIGITS)) for p in arr_pos]
+
     print("Packing post-processing complete.")

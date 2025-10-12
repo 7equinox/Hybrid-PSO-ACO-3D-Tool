@@ -5,7 +5,7 @@ Module Name: Standalone Particle Swarm Optimization (PSO) Algorithm
 Purpose of this file:
 This module contains the complete implementation of the standalone Particle
 Swarm Optimization (PSO) algorithm. This code is a direct and faithful
-translation of the PSO System Architecture flowchart (Figure 4) presented in
+translation of the PSO System Architecture flowchart (Figure 5) presented in
 Chapter 3 of the methodology. PSO works by simulating a "swarm" of particles,
 where each particle represents a potential solution to the packing problem.
 These particles "fly" through the solution space, influenced by their own best-found
@@ -36,7 +36,7 @@ def fnRunPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
     """
     Executes the complete standalone Particle Swarm Optimization algorithm, from
     initialization to the final result, strictly following the procedural flowchart
-    (Figure 4) from the methodology.
+    (Figure 5) from the methodology.
 
     Args:
         arrItems (list): The list of item objects to be packed.

@@ -5,7 +5,7 @@ Module Name: Proposed Hybrid PSO-ACO Algorithm
 Purpose of this file:
 This module contains the implementation of the novel Hybrid Particle Swarm and
 Ant Colony Optimization (PSO-ACO) algorithm. This code is a direct translation
-of the proposed Hybrid System Architecture flowchart (Figure 6) from Chapter 3.
+of the proposed Hybrid System Architecture flowchart (Figure 7) from Chapter 3.
 The central innovation of this algorithm is the deep integration of ACO's
 pheromone-based memory mechanism directly into the PSO search loop.
 
@@ -42,7 +42,7 @@ def fnRunHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, 
                                 intNumParticles=10, intMaxGenerations=10, fltEvaporationRate=0.2):
     """
     Executes the proposed Pheromone-Augmented Particle Swarm Optimization (PACO) algorithm,
-    strictly following the procedural flowchart (Figure 6) from the methodology.
+    strictly following the procedural flowchart (Figure 7) from the methodology.
     
     Args:
         arrItems (list): The list of item objects to be packed.
@@ -63,7 +63,7 @@ def fnRunHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, 
     arr_serviceTimes = np.array([p.get('service_time', 1) for p in arrPackagesInfo])
     arr_serviceTimes[arr_serviceTimes == 0] = 1
 
-    # --- INITIALIZATION (Combines elements from both PSO and ACO, as per Figure 6) ---
+    # --- INITIALIZATION (Combines elements from both PSO and ACO, as per Figure 7) ---
     # The hybrid algorithm begins by setting up the necessary components from both of its parent methodologies.
     
     # 1. Initialize the PSO components: A swarm of particles.
@@ -83,7 +83,7 @@ def fnRunHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, 
     obj_toolbox.register("update", _fnUpdateParticleHybrid, pheromone_matrix=mtr_pheromoneMatrix,
                          service_times=arr_serviceTimes, phi1=1.5, phi2=1.5, phi3=2.0, phi4=1.5)
 
-    # --- HYBRID OPTIMIZATION LOOP (The core cycle of the Hybrid Flowchart, Figure 6) ---
+    # --- HYBRID OPTIMIZATION LOOP (The core cycle of the Hybrid Flowchart, Figure 7) ---
     try:
         for gen in range(intMaxGenerations):
             dictProgressTracker['current'] = gen + 1 # Update UI progress.

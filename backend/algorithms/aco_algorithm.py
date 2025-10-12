@@ -5,7 +5,7 @@ Module Name: Standalone Ant Colony Optimization (ACO) Algorithm
 Purpose of this file:
 This module contains the complete implementation of the standalone Ant Colony
 Optimization (ACO) algorithm. This code is a direct and faithful translation of
-the ACO System Architecture flowchart (Figure 5) presented in Chapter 3. ACO is
+the ACO System Architecture flowchart (Figure 6) presented in Chapter 3. ACO is
 inspired by the foraging behavior of real ants. It uses a collective, memory-based
 search strategy where artificial "ants" build solutions piece by piece. Their choices
 are influenced by "pheromone trails"—a shared memory that records which paths
@@ -35,7 +35,7 @@ def fnRunAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
     """
     Executes the complete standalone Ant Colony Optimization algorithm, from
     initialization to the final result, strictly following the procedural flowchart
-    (Figure 5) from the methodology.
+    (Figure 6) from the methodology.
 
     Args:
         arrItems (list): The list of item objects to be packed.

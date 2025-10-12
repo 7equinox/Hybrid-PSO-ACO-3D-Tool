@@ -819,12 +819,12 @@ document.addEventListener("DOMContentLoaded", () =>
                     });
                     
                     // === INITIAL CAMERA POSITION ===
-                    // We calculate the largest dimension of the vehicle to set an appropriate initial camera distance.
-                    const fltMaxDim = Math.max(fltVehicleW, fltVehicleH, fltVehicleD);
-                    // Position the camera to provide a good overview of the packed container from the side.
-                    objCamera.position.x = -fltMaxDim; 
-                    objCamera.position.y = objContainerCenter.y;
-                    objCamera.position.z = objContainerCenter.z;
+                    // We set a fixed viewing angle relative to the container's dimensions to match the
+                    // requested upper-front-left perspective, with a slight zoom.
+                    const fltZoomFactor = 1.05; // A smaller number (e.g., 1.0) zooms in more. A larger number (e.g., 2.0) zooms out.
+                    objCamera.position.x = objContainerCenter.x - (fltVehicleW / fltZoomFactor);
+                    objCamera.position.y = objContainerCenter.y + ((fltVehicleH / fltZoomFactor) + 10);
+                    objCamera.position.z = objContainerCenter.z - ((fltVehicleD / fltZoomFactor) + 80); // Negative Z to see the 'Left 
                     // We tell the camera controls to look at the center of the container.
                     objControls.target.copy(objContainerCenter);
                     // Save this initial view so the "Reset View" button knows where to return to.

@@ -27,6 +27,7 @@ ESTONILO, JULIUS EVAN C.
 import time         # For measuring computation time.
 import random       # For random sampling and other stochastic processes in the algorithms.
 import numpy as np  # A powerful library for numerical operations, used here for statistical calculations.
+import math         # For mathematical operations.
 from memory_profiler import memory_usage # A specialized tool for measuring peak RAM usage.
 from py3dbp import Packer, Bin, Item # The core library for performing the 3D bin packing simulation.
 
@@ -38,6 +39,41 @@ from backend.simulation.custom_exceptions import CancelledException
 from backend.algorithms.pso_algorithm import fnRunPsoAlgorithm
 from backend.algorithms.aco_algorithm import fnRunAcoAlgorithm
 from backend.algorithms.hybrid_pso_aco_algorithm import fnRunHybridPsoAcoAlgorithm
+
+
+def _fnCalculateRectangularDimensions(fltVolumeCm3):
+    """
+    Calculates realistic, non-cubic dimensions for a truck container based on its total volume.
+    This function derives width, height, and depth from a fixed aspect ratio (e.g., a
+    Depth:Height:Width of ~2:1.2:1) to ensure the container is a rectangular prism.
+
+    Args:
+        fltVolumeCm3 (float): The total volume of the container.
+
+    Returns:
+        dict: A dictionary containing the calculated 'width', 'height', and 'depth'.
+    """
+    # Define the new aspect ratio: Height = 0.5 * Length, SidewaysDepth = 0.4 * Length
+    # The longest dimension is now the length (our 'width' variable for the X-axis).
+    # Volume (V) = width * (0.5 * width) * (0.4 * width) = 0.2 * width^3
+    # From this, solve for width: width = (V / 0.2)^(1/3)
+    try:
+        # 'width' is the length of the truck container (longest dimension, X-axis)
+        flt_width = (fltVolumeCm3 / 0.2) ** (1./3.)
+        # 'height' is the vertical dimension (Y-axis)
+        flt_height = flt_width * 0.5
+        # 'depth' is the sideways dimension (Z-axis)
+        flt_depth = flt_width * 0.4
+    except (ValueError, ZeroDivisionError):
+        # Fallback for invalid volume inputs.
+        return {"width": 0, "height": 0, "depth": 0}
+    
+    # Use math.floor to ensure integer dimensions, consistent with the original methodology.
+    return {
+        "width": math.floor(flt_width),
+        "height": math.floor(flt_height),
+        "depth": math.floor(flt_depth)
+    }
 
 
 def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled, dictProgressTracker):
@@ -64,6 +100,15 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     print("Simulation started: Loading full dataset for the given capacity...")
     # Fetch the complete, aggregated dataset for the selected vehicle capacity from the data manager.
     dict_vehicleInfo, arr_packagesInfo = fnGetSimulationDataForVehicle(fltCapacityCm3, dictCancellationFlag)
+    
+    # --- Convert Cube to Rectangular Prism ---
+    # For a more realistic simulation, this step
+    # recalculates the container's dimensions into a rectangular prism (like a truck)
+    # while preserving the total original volume. This new shape is then used for the entire simulation.
+    dict_rectangularDimensions = _fnCalculateRectangularDimensions(fltCapacityCm3)
+    dict_vehicleInfo.update(dict_rectangularDimensions)
+    print(f"Container shape override: Using rectangular dimensions {dict_vehicleInfo['width']}x{dict_vehicleInfo['height']}x{dict_vehicleInfo['depth']}")
+
 
     # If the required data could not be loaded for any reason, halt the process.
     if not dict_vehicleInfo or not arr_packagesInfo:
@@ -140,6 +185,7 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         arr_packagesToLoad = arr_packagesInfo
 
     # Convert our simplified data into the specific 'Item' and 'Bin' objects required by the py3dbp library.
+    # The 'Bin' object now uses the RECTANGULAR dimensions calculated earlier.
     arr_itemsToPack = [Item(p['id'], p['width'], p['height'], p['depth'], 1) for p in arr_packagesToLoad]
     obj_bin = Bin(
         dict_vehicleInfo['id'],
@@ -293,6 +339,7 @@ def _fnPostProcessPacking(objBin):
     print("Starting packing post-processing for physical realism...")
     
     list_items = objBin.items
+    # This correctly reads the (potentially rectangular) dimensions from the Bin object.
     bin_dims = [np.floor(float(objBin.width)), np.floor(float(objBin.height)), np.floor(float(objBin.depth))]
     
     # --- Stage 1: Iterative Gravity Simulation ---

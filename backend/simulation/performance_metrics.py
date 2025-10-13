@@ -62,7 +62,14 @@ def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo):
     # is the core mechanism that allows us to quantitatively answer the research questions
     # about operational efficiency—the very factor that standard packing algorithms typically ignore.
     tpl_unloadingResults = _fnSimulateUnloading(arrPackedItems, arr_deliverySequence, dict_packagesInfoMap)
-    int_relocationCount, int_unloadingSequenceLength, bln_isFeasible = tpl_unloadingResults
+    # The original sequence length from the simulation is discarded in favor of the explicit formula.
+    int_relocationCount, _, bln_isFeasible = tpl_unloadingResults
+
+    # As per the methodology, the Unloading Sequence Length is the total number of actions required.
+    # This is the sum of correctly retrieving every loaded package plus every extra relocation move.
+    num_products_loaded = len(arrPackedItems)
+    int_unloadingSequenceLength = num_products_loaded + int_relocationCount
+
 
     # Consolidate all metrics into a single, structured results object.
     return {

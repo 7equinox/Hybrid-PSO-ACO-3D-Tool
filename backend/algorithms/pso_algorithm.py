@@ -125,7 +125,7 @@ def fnRunPsoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
         # This block ensures a graceful exit if the user cancels the simulation.
         print("PSO algorithm was cancelled.")
         solution = obj_gbest if obj_gbest else []
-        fitness = obj_gbest.fitness.values if obj_gbest else (0, float('inf'), float('inf'))
+        fitness = obj_gbest.fitness.values if obj_gbest else (float('inf'), float('inf'))
         return solution, fitness
 
     # After the loop terminates, the best solution found throughout the entire run is returned.

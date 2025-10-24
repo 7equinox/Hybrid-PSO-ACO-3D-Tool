@@ -72,7 +72,7 @@ def fnRunAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
 
     # Variables to track the best solution found across the entire history of the run.
     arr_bestSolutionEver = []
-    tpl_bestFitnessEver = (0, float('inf'), float('inf'))
+    tpl_bestFitnessEver = (float('inf'), float('inf'))
 
     # --- ITERATIVE OPTIMIZATION LOOP (The main cycle of the ACO Flowchart) ---
     try:
@@ -96,12 +96,13 @@ def fnRunAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
                 arr_allAntSolutions.append((arr_solution, tpl_fitness))
 
                 # Update the overall best-so-far solution found across the entire run.
-                # A proper multi-objective check is used: prioritize better volume, then fewer relocations for ties.
-                is_better = (tpl_fitness[0] > tpl_bestFitnessEver[0]) or \
-                            (tpl_fitness[0] == tpl_bestFitnessEver[0] and tpl_fitness[1] < tpl_bestFitnessEver[1])
-                if is_better:
+                # We now use Pareto dominance logic for a multi-objective problem where lower is better for both.
+                if (tpl_fitness[0] < tpl_bestFitnessEver[0] and tpl_fitness[1] < tpl_bestFitnessEver[1]) or \
+                   (tpl_fitness[0] <= tpl_bestFitnessEver[0] and tpl_fitness[1] < tpl_bestFitnessEver[1]) or \
+                   (tpl_fitness[0] < tpl_bestFitnessEver[0] and tpl_fitness[1] <= tpl_bestFitnessEver[1]):
                     arr_bestSolutionEver = arr_solution
                     tpl_bestFitnessEver = tpl_fitness
+
 
             # --- UPDATE PHEROMONE TRAIL (The "learning" step of ACO) ---
             # This is where the collective memory of the swarm is updated based on the
@@ -118,8 +119,10 @@ def fnRunAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
             # are reinforced. Ants "deposit" more pheromones on these successful trails, making them
             # more attractive and more likely to be chosen by ants in future generations.
             for arr_solution, tpl_fitness in arr_allAntSolutions:
-                # The amount of pheromone deposited is proportional to the solution's quality (its Volume Utilization).
-                flt_pheromoneDeposit = tpl_fitness[0]
+                # The amount of pheromone deposited is inversely proportional to the solution's
+                # primary fitness value (volume utilization), since lower is now better.
+                # FIX: Explicitly cast tpl_fitness[0] to float to prevent the TypeError.
+                flt_pheromoneDeposit = 1.0 / (1.0 + float(tpl_fitness[0]))
                 if flt_pheromoneDeposit > 0:
                     # For each step in the successful path, reinforce the connection.
                     for i in range(int_numItems - 1):

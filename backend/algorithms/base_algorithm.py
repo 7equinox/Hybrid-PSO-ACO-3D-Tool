@@ -34,16 +34,15 @@ from deap import base, creator # Core components from the DEAP library for creat
 # but on multiple, often conflicting, objectives.
 
 # The `weights` tuple is the key. It tells the algorithm whether to MAXIMIZE or MINIMIZE each objective score:
-#   - Objective 1 (Weight: 1.0): Volume Utilization. We want this to be as high as possible (MAXIMIZE).
+#   - Objective 1 (Weight: -1.0): Volume Utilization (Bounding Box). We want this to be as low as possible (MINIMIZE).
 #   - Objective 2 (Weight: -1.0): Relocation Count. We want this to be as low as possible (MINIMIZE).
-#   - Objective 3 (Weight: -1.0): Unloading Sequence Length. We also want this to be as low as possible (MINIMIZE).
 
 # This multi-objective setup is what enables our algorithms to learn the subtle trade-offs
-# and distinguish between a densely packed but operationally disastrous solution and a
-# slightly less dense but highly efficient and feasible one. This is central to our research hypothesis.
+# between a compact packing (low bounding box volume) and a highly efficient and feasible one
+# (low relocation count). This is central to our research hypothesis.
 try:
     # We define a new fitness type called "FitnessMulti".
-    creator.create("FitnessMulti", base.Fitness, weights=(1.0, -1.0, -1.0))
+    creator.create("FitnessMulti", base.Fitness, weights=(-1.0, -1.0))
 except Exception:
     # This try-except block is a technical requirement. It prevents an error if the code
     # is reloaded during development, as DEAP does not allow re-creating an existing type.

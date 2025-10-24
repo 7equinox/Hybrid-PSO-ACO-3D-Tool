@@ -118,12 +118,14 @@ def fnRunHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, 
             # generation are allowed to deposit pheromones. This is a critical refinement that
             # ensures only high-quality solution components (good item sub-sequences) are
             # reinforced, preventing mediocre solutions from polluting the collective memory.
-            list_sortedSwarm = sorted(list_swarm, key=lambda p: p.fitness.values[0], reverse=True)
+            list_sortedSwarm = sorted(list_swarm, key=lambda p: p.fitness.values[0]) # Sort by smallest VU
             int_numElites = max(1, int(0.2 * len(list_swarm))) # The top 20% of particles are elites.
 
             for obj_eliteParticle in list_sortedSwarm[:int_numElites]:
-                # The amount of pheromone deposited is proportional to the elite solution's quality.
-                flt_depositAmount = obj_eliteParticle.fitness.values[0]
+                # The amount of pheromone deposited is now inversely proportional to the elite solution's
+                # primary fitness value (volume utilization), since a lower value is better.
+                # FIX: Explicitly cast the fitness value to float before the division operation.
+                flt_depositAmount = 1.0 / (1.0 + float(obj_eliteParticle.fitness.values[0]))
                 if flt_depositAmount > 0 and len(obj_eliteParticle) > 1:
                     for i in range(int_numItems - 1):
                         mtr_pheromoneMatrix[obj_eliteParticle[i]][obj_eliteParticle[i+1]] += flt_depositAmount
@@ -139,7 +141,7 @@ def fnRunHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, 
     except CancelledException:
         print("Hybrid PSO-ACO algorithm was cancelled.")
         solution = obj_gbest if obj_gbest else []
-        fitness = obj_gbest.fitness.values if obj_gbest else (0, float('inf'), float('inf'))
+        fitness = obj_gbest.fitness.values if obj_gbest else (float('inf'), float('inf'))
         return solution, fitness
 
     # After all generations, return the best solution found.

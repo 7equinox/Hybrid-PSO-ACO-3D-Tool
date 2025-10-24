@@ -229,7 +229,7 @@ document.addEventListener("DOMContentLoaded", () =>
         g_blnLoadCancellationRequested = false; 
         g_objRunSimBtn.disabled = true; // Disable the "Simulate" button while data is loading.
         _resetInitialUI(); // Clear any old data from the left panel.
-        _showLoader("Starting data load...", { showLoadCancel: false, loadCancelDisabled: false }); // Show the loader.
+        _showLoader("Starting data load...", { showLoadCancel: true, loadCancelDisabled: false }); // Show the loader.
 
         try 
         {
@@ -391,7 +391,7 @@ document.addEventListener("DOMContentLoaded", () =>
         
         // Hide the configuration modal and show the loader.
         g_objConfigModal.style.display = "none";
-        _showLoader("Starting simulation...", { showSimCancel: true, simCancelDisabled: true });
+        _showLoader("Starting simulation...", { showSimCancel: true, simCancelDisabled: false });
         
         try 
         {
@@ -457,7 +457,7 @@ document.addEventListener("DOMContentLoaded", () =>
                 {
                     _showLoader(
                         `Optimizing... (Generation ${progress.current} / ${progress.total})`, 
-                        { showSimCancel: false } // Keep cancel button injvisible and disabled.
+                        { showSimCancel: false }
                     );
                 } 
                 else 
@@ -649,8 +649,6 @@ document.addEventListener("DOMContentLoaded", () =>
         document.getElementById('metric-mem-usage').textContent = metrics.memory_usage_mb;
         document.getElementById('metric-vol-util').textContent = metrics.volume_utilization;
         document.getElementById('metric-reloc-count').textContent = metrics.relocation_count;
-        document.getElementById('metric-feasibility').textContent = metrics.unloading_feasibility;
-        document.getElementById('metric-seq-len').textContent = metrics.unloading_sequence_length;
 
         // Populate the "Packed Items" table.
         const objResultTableBody = document.getElementById('result-item-table-body');

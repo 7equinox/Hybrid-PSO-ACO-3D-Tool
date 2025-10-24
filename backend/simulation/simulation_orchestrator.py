@@ -33,7 +33,7 @@ from py3dbp import Packer, Bin, Item # The core library for performing the 3D bi
 
 
 # --- Import Custom Application Modules ---
-from backend.data_management.data_manager import fnGetSimulationDataForVehicle
+from backend.data_management.data_manager import fnGetDisplayDataForVehicle
 from backend.simulation.performance_metrics import fnCalculateAllMetrics
 from backend.simulation.custom_exceptions import CancelledException
 from backend.algorithms.pso_algorithm import fnRunPsoAlgorithm
@@ -96,13 +96,12 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         raise CancelledException()
 
     # --- Stage 1: Data Loading ---
+    # As per the new methodology, we load the single, representative route sample for the
+    # selected vehicle. This same dataset is shown on the left panel (Amazon data) and is
+    # now used as the direct input for the simulation, ensuring a 1-to-1 comparison.
     dictProgressTracker['message'] = "Loading dataset..." # Update UI feedback.
-    print("Simulation started: Loading full dataset for the given capacity...")
-    # Fetch the complete, aggregated dataset for the selected vehicle capacity from the data manager.
-    dict_vehicleInfo, arr_packagesInfo = fnGetSimulationDataForVehicle(fltCapacityCm3, dictCancellationFlag)
-    # ** Store a copy of the full dataset before sampling for the dynamic constraint 'insert' operation.
-    arr_full_dataset_for_capacity = arr_packagesInfo[:]
-
+    print("Simulation started: Loading the specific route dataset for the given capacity...")
+    dict_vehicleInfo, arr_packagesInfo = fnGetDisplayDataForVehicle(fltCapacityCm3, dictCancellationFlag)
     
     # --- Convert Cube to Rectangular Prism ---
     # For a more realistic simulation, this step
@@ -118,60 +117,11 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         if dictCancellationFlag['is_cancelled']: raise CancelledException()
         return {'error': 'Could not get vehicle info or package data was missing.'}
 
-    # --- Stage 2: Sampling Method Implementation ---
-    # This is a critical engineering step to solve a major computational problem.
-    # The full dataset for larger vehicles can contain tens of thousands of items, which would
-    # require enormous amounts of memory and weeks of computation time. To make the experiment
-    # feasible on standard hardware, we implement a 'Volume-Constrained Stratified Random
-    # Sampling' method. This technique intelligently creates a smaller, yet statistically
-    # representative, problem instance. This allows us to fairly benchmark the algorithms
-    # under controlled, solvable conditions.
-    dictProgressTracker['message'] = "Sampling data..."
-    INT_MAX_SAMPLE_SIZE = 400 # A hard limit to prevent out-of-memory errors during the experiment.
-    if len(arr_packagesInfo) > INT_MAX_SAMPLE_SIZE:
-        print(f"Original dataset has {len(arr_packagesInfo)} items. Applying sampling to reduce to {INT_MAX_SAMPLE_SIZE}.")
-
-        # Step 2a: Stratification. We categorize items into Small, Medium, and Large based on volume.
-        # This ensures that our smaller sample maintains the same general distribution of item sizes
-        # as the much larger original dataset, preserving its real-world characteristics.
-        arr_volumes = [p['volume'] for p in arr_packagesInfo]
-        flt_p33, flt_p66 = np.percentile(arr_volumes, [33.3, 66.7])
-        arr_smallItems = [p for p in arr_packagesInfo if p['volume'] <= flt_p33]
-        arr_mediumItems = [p for p in arr_packagesInfo if flt_p33 < p['volume'] <= flt_p66]
-        arr_largeItems = [p for p in arr_packagesInfo if p['volume'] > flt_p66]
-
-        random.shuffle(arr_smallItems)
-        random.shuffle(arr_mediumItems)
-        random.shuffle(arr_largeItems)
-
-        # Step 2b: Proportional and Constrained Selection.
-        # We build the new sample by iteratively adding items from each size category. The process
-        # stops when we either reach the max sample size OR the total volume of sampled items
-        # exceeds the vehicle's capacity. This guarantees a feasible and standardized problem.
-        arr_sampledPackages = []
-        flt_currentVolume = 0.0
-        iter_small = iter(arr_smallItems)
-        iter_medium = iter(arr_mediumItems)
-        iter_large = iter(arr_largeItems)
-
-        while len(arr_sampledPackages) < INT_MAX_SAMPLE_SIZE:
-            bln_addedInCycle = False
-            for iterator in [iter_small, iter_medium, iter_large]:
-                try:
-                    obj_item = next(iterator)
-                    if flt_currentVolume + obj_item['volume'] <= fltCapacityCm3: # The volume constraint.
-                        arr_sampledPackages.append(obj_item)
-                        flt_currentVolume += obj_item['volume']
-                        bln_addedInCycle = True
-                except StopIteration:
-                    pass
-                if len(arr_sampledPackages) >= INT_MAX_SAMPLE_SIZE: break
-            if not bln_addedInCycle: break
-
-        arr_packagesInfo = arr_sampledPackages # The smaller sample now becomes our official problem instance.
-        print(f"Sampling complete. New problem size: {len(arr_packagesInfo)} items.")
-
-    # At this point, the final set of items for the initial optimization is prepared.
+    # --- Stage 2: Problem Instance Preparation (No Sampling) ---
+    # The 'arr_packagesInfo' variable now contains the exact, final set of items
+    # that will be used for the optimization problem. The sampling stage has been removed.
+    print(f"Problem instance loaded. Algorithm will run on {len(arr_packagesInfo)} items.")
+    dictProgressTracker['message'] = "Preparing items..."
     arr_packagesToLoad = arr_packagesInfo
 
     # Convert our simplified data into the specific 'Item' and 'Bin' objects required by the py3dbp library.
@@ -195,9 +145,9 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     # --- The Fitness Function (Directly Answering Research Questions 1 & 2) ---
     # This single function is the heart of the evaluation process. It takes a potential solution
     # (a specific packing order) from an algorithm and calculates its quality based on our key
-    # research metrics: Volume Utilization, Relocation Count, Unloading Feasibility, and Sequence Length.
-    # By using this exact same function to judge all three algorithms, we ensure a fair,
-    # unbiased, and scientifically sound comparison. This directly addresses the Statement of the Problem.
+    # research metrics: Volume Utilization and Relocation Count. By using this exact same
+    # function to judge all three algorithms, we ensure a fair, unbiased, and scientifically
+    # sound comparison. This directly addresses the Statement of the Problem.
     def fnEvaluateSolution(arrItemOrderIndices):
         tpl_solutionKey = tuple(arrItemOrderIndices) # Convert to tuple to use as a dictionary key.
         if tpl_solutionKey in dict_fitnessCache:
@@ -218,24 +168,15 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         obj_packer.pack(bigger_first=True, distribute_items=True, number_of_decimals=0)
 
         arr_packedItems = obj_packer.bins[0].items
-        if not arr_packedItems:
-            # If a solution results in no items being packed, it's given the worst possible fitness score.
-            tpl_fitness = (0, float('inf'), float('inf'))
-        else:
-            # Delegate the calculation of all metrics to the dedicated performance_metrics module.
-            dict_metrics = fnCalculateAllMetrics(arr_packedItems, obj_bin.get_volume(), arr_packagesToLoad)
+        # Delegate the calculation of all metrics to the dedicated performance_metrics module.
+        dict_metrics = fnCalculateAllMetrics(arr_packedItems, obj_bin.get_volume(), arr_packagesToLoad)
             
-            # An 'Infeasible' solution (one with unloading deadlocks) is heavily penalized.
-            # This guides the algorithms away from such operationally disastrous arrangements.
-            if dict_metrics['unloading_feasibility'] == 'Infeasible':
-                tpl_fitness = (0, float('inf'), float('inf'))
-            else:
-                # This tuple represents the multi-objective fitness of the solution.
-                tpl_fitness = (
-                    dict_metrics['volume_utilization'],
-                    dict_metrics['relocation_count'],
-                    dict_metrics['unloading_sequence_length']
-                )
+        # This tuple represents the new, two-objective fitness of the solution.
+        # Both objectives are now minimized.
+        tpl_fitness = (
+            dict_metrics['volume_utilization'],
+            dict_metrics['relocation_count']
+        )
         
         dict_fitnessCache[tpl_solutionKey] = tpl_fitness # Cache the result before returning.
         return tpl_fitness
@@ -263,69 +204,25 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     flt_computationTime = round(time.time() - tm_startTime, 2)
     
     # --- Stage 4: Dynamic Constraint Implementation ---
-    # This stage simulates last-minute disruptions. It first determines which actions
-    # (remove or substitute) are possible, then randomly chooses one to execute.
-    # This guarantees that a disruption always occurs if one is possible.
+    # This stage simulates a last-minute disruption by REMOVING a random percentage
+    # of packages from the algorithm's best-found solution.
     dictProgressTracker['message'] = "Applying constraints..."
     if blnIsDynamicConstraintEnabled:
-        # Determine the set of packed items from the initial solution.
         set_packed_indices = set(arr_bestSolutionIndices)
         
-        # Find packages that exist in the full dataset but were not part of the initial problem.
-        initial_problem_ids = {p['id'] for p in arr_packagesToLoad}
-        new_item_candidates = [p for p in arr_full_dataset_for_capacity if p['id'] not in initial_problem_ids]
-        
-        # Build a list of actions that are currently possible.
-        arr_possible_actions = []
+        # Only the 'remove' action is now performed.
         if len(set_packed_indices) > 1:
-            arr_possible_actions.append('remove')
-        # Substitution is possible only if there are packed items to remove and new items to add.
-        if set_packed_indices and new_item_candidates:
-            arr_possible_actions.append('insert')
+            print("Dynamic constraint: Applying REMOVE action.")
+            # Randomly remove between 10% and 20% of the currently packed items.
+            num_to_remove = int(len(set_packed_indices) * random.uniform(0.1, 0.2))
+            # Ensure at least one item is removed if possible.
+            num_to_remove = max(1, num_to_remove) if num_to_remove > 0 else 0
             
-        if arr_possible_actions:
-            # Randomly select a valid action to perform.
-            str_action = random.choice(arr_possible_actions)
-            
-            # --- REMOVE ACTION ---
-            if str_action == 'remove':
-                print("Dynamic constraint: Applying REMOVE action.")
-                num_to_remove = int(len(set_packed_indices) * random.uniform(0.1, 0.2))
-                num_to_remove = max(1, num_to_remove) if num_to_remove > 0 else 0
-                
-                if num_to_remove > 0:
-                    indices_to_remove = random.sample(list(set_packed_indices), num_to_remove)
-                    arr_bestSolutionIndices = [i for i in arr_bestSolutionIndices if i not in indices_to_remove]
-                    print(f"Removed {num_to_remove} items. New count: {len(arr_bestSolutionIndices)}.")
-
-            # --- INSERT ACTION (as Substitution) ---
-            elif str_action == 'insert':
-                print("Dynamic constraint: Applying INSERT (substitution) action.")
-                # The number to substitute is based on the packed items and cannot exceed the available pools.
-                num_to_substitute = int(len(set_packed_indices) * random.uniform(0.1, 0.2))
-                num_to_substitute = min(num_to_substitute, len(new_item_candidates), len(set_packed_indices))
-                num_to_substitute = max(1, num_to_substitute) if num_to_substitute > 0 else 0
-
-                if num_to_substitute > 0:
-                    # Step 1: Select indices to remove from the current best solution.
-                    indices_to_remove = random.sample(arr_bestSolutionIndices, num_to_substitute)
-                    
-                    # Step 2: Select brand new packages to insert.
-                    new_packages_to_add = random.sample(new_item_candidates, num_to_substitute)
-                    
-                    # Step 3: Add these new packages to our master lists and get their new indices.
-                    newly_added_indices = []
-                    for new_pkg in new_packages_to_add:
-                        arr_packagesToLoad.append(new_pkg)
-                        arr_itemsToPack.append(Item(new_pkg['id'], new_pkg['width'], new_pkg['height'], new_pkg['depth'], 1))
-                        newly_added_indices.append(len(arr_itemsToPack) - 1) # The index is the new last position.
-
-                    # Step 4: Rebuild the solution by removing old indices and adding the new ones.
-                    arr_bestSolutionIndices = [i for i in arr_bestSolutionIndices if i not in indices_to_remove]
-                    arr_bestSolutionIndices.extend(newly_added_indices)
-                    
-                    print(f"Substituted {num_to_substitute} items. Solution count is now {len(arr_bestSolutionIndices)}.")
-        
+            if num_to_remove > 0:
+                indices_to_remove = random.sample(list(set_packed_indices), num_to_remove)
+                # The new solution is the old one, but with the removed items filtered out.
+                arr_bestSolutionIndices = [i for i in arr_bestSolutionIndices if i not in indices_to_remove]
+                print(f"Removed {num_to_remove} items. New count: {len(arr_bestSolutionIndices)}.")
         else:
             # This handles edge cases where no disruption is possible (e.g., only 1 item).
             print("Dynamic constraint was enabled but no action was possible.")
@@ -341,8 +238,6 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     obj_finalPacker = Packer()
     obj_finalPacker.add_bin(obj_bin)
 
-    # Note: we use the final (potentially disrupted) arr_bestSolutionIndices here.
-    # This works because the underlying arr_itemsToPack has been updated.
     for int_i in arr_bestSolutionIndices:
         obj_finalPacker.add_item(arr_itemsToPack[int_i])
 
@@ -356,7 +251,6 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     flt_totalPackedServiceTime = 0
     
     # Recalculate the final metrics based on the contents of the bin AFTER the potential disruption.
-    # Note: arr_packagesToLoad now includes the newly inserted items.
     final_metrics = fnCalculateAllMetrics(obj_finalPacker.bins[0].items, obj_bin.get_volume(), arr_packagesToLoad)
     
     # We combine the original package data with the final packed positions and dimensions from the simulation.
@@ -388,8 +282,6 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
             'memory_usage_mb': round(flt_memUsage, 2),
             'volume_utilization': final_metrics['volume_utilization'],
             'relocation_count': final_metrics['relocation_count'],
-            'unloading_feasibility': final_metrics['unloading_feasibility'],
-            'unloading_sequence_length': final_metrics['unloading_sequence_length']
         },
         'packed_items': arr_finalPackedItemsDetails,
         'vehicle_info': {

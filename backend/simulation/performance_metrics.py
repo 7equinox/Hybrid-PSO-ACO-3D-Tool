@@ -56,28 +56,17 @@ def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo):
     set_packedStops = {dict_packagesInfoMap.get(item.name, {}).get('stop_id') for item in arrPackedItems}
     arr_deliverySequence = sorted(list(filter(None, set_packedStops)))
 
-    # --- METRICS 2, 3, & 4: THE UNLOADING SIMULATION ---
-    # The following metrics are the novel contribution of this research. They are derived from
-    # a detailed, step-by-step simulation of the physical unloading process. This simulation
-    # is the core mechanism that allows us to quantitatively answer the research questions
-    # about operational efficiency—the very factor that standard packing algorithms typically ignore.
-    tpl_unloadingResults = _fnSimulateUnloading(arrPackedItems, arr_deliverySequence, dict_packagesInfoMap)
-    # The original sequence length from the simulation is discarded in favor of the explicit formula.
-    int_relocationCount, _, bln_isFeasible = tpl_unloadingResults
-
-    # As per the methodology, the Unloading Sequence Length is the total number of actions required.
-    # This is the sum of correctly retrieving every loaded package plus every extra relocation move.
-    num_products_loaded = len(arrPackedItems)
-    int_unloadingSequenceLength = num_products_loaded + int_relocationCount
+    # --- METRIC 2: THE UNLOADING SIMULATION ---
+    # This metric is derived from a detailed, step-by-step simulation of the physical
+    # unloading process. This simulation is the core mechanism that allows us to quantitatively
+    # answer the research questions about operational efficiency.
+    int_relocationCount = _fnSimulateUnloading(arrPackedItems, arr_deliverySequence, dict_packagesInfoMap)
 
 
     # Consolidate all metrics into a single, structured results object.
     return {
         'volume_utilization': round(flt_volumeUtilization, 2),
         'relocation_count': int_relocationCount,
-        # This boolean directly informs the 'Feasibility Rate' calculation in the methodology.
-        'unloading_feasibility': "Feasible" if bln_isFeasible else "Infeasible",
-        'unloading_sequence_length': int_unloadingSequenceLength
     }
 
 
@@ -85,25 +74,23 @@ def _fnSimulateUnloading(arrPackedItems, arrDeliverySequence, dictPackagesInfoMa
     """
     Simulates the physical, step-by-step process of a delivery driver unloading items
     from the vehicle. This function is the primary tool for evaluating the operational
-    viability and efficiency of a packing arrangement. It determines whether all items can be
-    retrieved in their correct delivery order and precisely quantifies the extra work
-    (relocations) and total effort (sequence length) required.
+    efficiency of a packing arrangement. It quantifies the extra work (relocations) required.
+    If an unloading deadlock occurs (items are trapped), it returns an infinite penalty.
 
     Physical Assumption: The delivery vehicle is unloaded from a single opening at the front
     (defined as the position with the largest X-coordinate).
 
     Returns:
-        tuple: A tuple containing (relocation_count, sequence_length, is_feasible).
+        int: The total number of relocations. Returns float('inf') if unloading is not feasible.
     """
-    # An empty vehicle is trivially easy to unload. It is perfectly feasible with zero work.
+    # An empty vehicle is perfectly feasible with zero work.
     if not arrPackedItems:
-        return 0, 0, True
+        return 0
 
     # Create a mutable copy of the items to simulate their physical removal from the vehicle.
     dict_itemsInBin = {item.name: item for item in arrPackedItems}
 
     int_relocations = 0      # Counts only the unnecessary moves.
-    int_sequenceLength = 0   # Counts ALL moves (retrievals + relocations).
 
     # Process each stop in the pre-defined delivery sequence, mimicking a driver's route.
     for str_targetStopId in arrDeliverySequence:
@@ -163,19 +150,17 @@ def _fnSimulateUnloading(arrPackedItems, arrDeliverySequence, dictPackagesInfoMa
                 for str_blockerId in arr_blockingItemsIds:
                     if str_blockerId in dict_itemsInBin:
                         int_relocations += 1      # This is an extra, wasted move.
-                        int_sequenceLength += 1   # Every move (good or bad) adds to the total effort.
                         del dict_itemsInBin[str_blockerId] # Simulate removing the blocker.
 
             # After all blockers are cleared, the target item can be retrieved.
             if str_targetItemId in dict_itemsInBin:
-                int_sequenceLength += 1   # A successful retrieval is one operational move.
                 del dict_itemsInBin[str_targetItemId] # Simulate removing the target item.
 
     # --- Final Feasibility Check ---
-    # The unloading process is considered "feasible" if, and only if, the vehicle is
-    # completely empty at the end. If any items remain, it signifies a "deadlock" scenario
-    # where some items were permanently trapped behind others. This represents a catastrophic
-    # operational failure for the packing solution.
-    bln_isFeasible = not dict_itemsInBin # If the dictionary is empty, it's feasible.
+    # If any items remain, it signifies a "deadlock" scenario where some items
+    # were permanently trapped. This is a catastrophic operational failure and is
+    # heavily penalized by returning an infinite relocation count.
+    if dict_itemsInBin: # If the dictionary is NOT empty, it's infeasible.
+        return float('inf')
 
-    return int_relocations, int_sequenceLength, bln_isFeasible
+    return int_relocations

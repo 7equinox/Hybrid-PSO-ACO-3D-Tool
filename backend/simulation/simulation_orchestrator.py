@@ -284,6 +284,7 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
             'relocation_count': final_metrics['relocation_count'],
         },
         'packed_items': arr_finalPackedItemsDetails,
+        'unloading_sequence': final_metrics['unloading_sequence'], # Pass the animation data to the frontend
         'vehicle_info': {
             **dict_vehicleInfo,
             'num_packages_loaded': num_products_loaded, # Use the final calculated number.

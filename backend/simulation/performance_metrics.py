@@ -60,13 +60,14 @@ def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo):
     # This metric is derived from a detailed, step-by-step simulation of the physical
     # unloading process. This simulation is the core mechanism that allows us to quantitatively
     # answer the research questions about operational efficiency.
-    int_relocationCount = _fnSimulateUnloading(arrPackedItems, arr_deliverySequence, dict_packagesInfoMap)
+    int_relocationCount, arr_unloadingSequence = _fnSimulateUnloading(arrPackedItems, arr_deliverySequence, dict_packagesInfoMap)
 
 
     # Consolidate all metrics into a single, structured results object.
     return {
         'volume_utilization': round(flt_volumeUtilization, 2),
         'relocation_count': int_relocationCount,
+        'unloading_sequence': arr_unloadingSequence # This sequence is now included for animation.
     }
 
 
@@ -74,23 +75,24 @@ def _fnSimulateUnloading(arrPackedItems, arrDeliverySequence, dictPackagesInfoMa
     """
     Simulates the physical, step-by-step process of a delivery driver unloading items
     from the vehicle. This function is the primary tool for evaluating the operational
-    efficiency of a packing arrangement. It quantifies the extra work (relocations) required.
-    If an unloading deadlock occurs (items are trapped), it returns an infinite penalty.
+    efficiency of a packing arrangement. It now returns both the total relocation count
+    and a detailed log of the unloading sequence for animation purposes.
 
     Physical Assumption: The delivery vehicle is unloaded from a single opening at the front
     (defined as the position with the largest X-coordinate).
 
     Returns:
-        int: The total number of relocations. Returns float('inf') if unloading is not feasible.
+        tuple: (int: total relocations, list: the sequence of unload/relocate actions).
     """
     # An empty vehicle is perfectly feasible with zero work.
     if not arrPackedItems:
-        return 0
+        return 0, []
 
     # Create a mutable copy of the items to simulate their physical removal from the vehicle.
     dict_itemsInBin = {item.name: item for item in arrPackedItems}
 
     int_relocations = 0      # Counts only the unnecessary moves.
+    arr_unloadingLog = [] # This will store the detailed step-by-step actions.
 
     # Process each stop in the pre-defined delivery sequence, mimicking a driver's route.
     for str_targetStopId in arrDeliverySequence:
@@ -150,17 +152,21 @@ def _fnSimulateUnloading(arrPackedItems, arrDeliverySequence, dictPackagesInfoMa
                 for str_blockerId in arr_blockingItemsIds:
                     if str_blockerId in dict_itemsInBin:
                         int_relocations += 1      # This is an extra, wasted move.
+                        # Log this action for the animation.
+                        arr_unloadingLog.append({'action': 'relocate', 'item_id': str_blockerId})
                         del dict_itemsInBin[str_blockerId] # Simulate removing the blocker.
 
             # After all blockers are cleared, the target item can be retrieved.
             if str_targetItemId in dict_itemsInBin:
+                # Log this primary action for the animation.
+                arr_unloadingLog.append({'action': 'unload', 'item_id': str_targetItemId})
                 del dict_itemsInBin[str_targetItemId] # Simulate removing the target item.
 
     # --- Final Feasibility Check ---
     # If any items remain, it signifies a "deadlock" scenario where some items
-    # were permanently trapped. This is a catastrophic operational failure and is
-    # heavily penalized by returning an infinite relocation count.
-    if dict_itemsInBin: # If the dictionary is NOT empty, it's infeasible.
-        return float('inf')
+    # were permanently trapped. This is a catastrophic operational failure.
+    if dict_itemsInBin:
+        # In a deadlock, we return an infinite penalty and an empty sequence.
+        return float('inf'), []
 
-    return int_relocations
+    return int_relocations, arr_unloadingLog

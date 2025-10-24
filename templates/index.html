@@ -114,15 +114,20 @@ ESTONILO, JULIUS EVAN C.
             </div>
             
             <div class="results-panel-content">
-                <!-- Header for Algorithm Name and Visualize Button -->
+                <!-- Header for Algorithm Name and Visualize Buttons -->
                 <div class="algorithm-header">
                     <div class="algorithm-title-group">
                         <p class="label">Algorithm</p>
                         <h2 id="result-algorithm-name">*Algorithm Name*</h2>
                     </div>
-                    <button id="visualize-btn">
-                        <i class="fa-solid fa-cube"></i> Visualize Packing
-                    </button>
+                    <div id="visualization-buttons" class="visualization-buttons-container">
+                        <button id="animate-load-btn">
+                            <i class="fa-solid fa-dolly"></i> Animate Loading
+                        </button>
+                        <button id="animate-unload-btn">
+                            <i class="fa-solid fa-box-open"></i> Animate Unloading
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Summary Banners for Simulation Results -->
@@ -285,7 +290,7 @@ ESTONILO, JULIUS EVAN C.
                 <li>
                     <strong>Analyze the Results:</strong>
                     <p>
-                        Once complete, the right-hand panel will display the outcome, including key metrics. If the simulation produced a valid result, a <strong><span class="highlight-text">Visualize Packing</span></strong> button will appear, which opens an interactive 3D view of the loaded vehicle.
+                        Once complete, the right-hand panel will display the outcome, including key metrics. If the simulation produced a valid result, buttons for <strong><span class="highlight-text">Animate Loading</span></strong> and <strong><span class="highlight-text">Animate Unloading</span></strong> will appear, which open interactive 3D animations of the process.
                     </p>
                 </li>
             </ol>

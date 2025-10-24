@@ -73,8 +73,10 @@ document.addEventListener("DOMContentLoaded", () =>
     // Reference to the table body where initial package data is displayed.
     const g_objInitialTableBody = document.getElementById('initial-item-table-body');
     
-    // Reference to the button that opens the 3D visualization window.
-    const g_objVisualizeBtn = document.getElementById('visualize-btn'); 
+    // References to the visualization buttons
+    const g_objVizButtonsContainer = document.getElementById('visualization-buttons');
+    const g_objAnimateLoadBtn = document.getElementById('animate-load-btn');
+    const g_objAnimateUnloadBtn = document.getElementById('animate-unload-btn');
     
     // References to the user guide modal and its buttons.
     const g_objGuidesModal = document.getElementById("guidesModal");
@@ -167,8 +169,10 @@ document.addEventListener("DOMContentLoaded", () =>
     // When the "Got It!" button inside the guides modal is clicked, hide it.
     g_objGotItBtn.onclick = () => { g_objGuidesModal.style.display = "none"; };
     
-    // Listen for a click on the "Visualize Packing" button and call the function to open the 3D view.
-    g_objVisualizeBtn.addEventListener('click', () => { _openVisualizationWindow(); });
+    // Listen for clicks on the animation buttons
+    g_objAnimateLoadBtn.addEventListener('click', () => { _openVisualizationWindow('load'); });
+    g_objAnimateUnloadBtn.addEventListener('click', () => { _openVisualizationWindow('unload'); });
+
 
     // This allows the user to close a modal by clicking on the dark background area outside of it.
     window.onclick = (event) => 
@@ -634,7 +638,7 @@ document.addEventListener("DOMContentLoaded", () =>
     function _updateResultsUI(objResults) 
     {
         g_objLastResults = objResults; // Cache the full results object.
-        g_objVisualizeBtn.style.display = 'none'; // Hide the visualize button initially.
+        g_objVizButtonsContainer.style.display = 'none'; // Hide the visualize buttons initially.
 
         // Update the summary cards on the right panel.
         document.getElementById('result-algorithm-name').textContent = objResults.algorithm_name;
@@ -658,8 +662,14 @@ document.addEventListener("DOMContentLoaded", () =>
         {
             objNoItemText.style.display = 'none';
             objResultTableBody.innerHTML = objResults.packed_items.map(_createTableRowHTML).join('');
-            // Only show the "Visualize Packing" button if there are items to show.
-            g_objVisualizeBtn.style.display = 'inline-flex';
+            
+            // Show the container for animation buttons.
+            g_objVizButtonsContainer.style.display = 'flex';
+            
+            // Only enable the "Animate Unloading" button if there is a valid sequence.
+            const hasUnloadingSequence = objResults.unloading_sequence && objResults.unloading_sequence.length > 0;
+            g_objAnimateUnloadBtn.disabled = !hasUnloadingSequence;
+            g_objAnimateLoadBtn.disabled = false;
         } 
         else
         {
@@ -669,41 +679,37 @@ document.addEventListener("DOMContentLoaded", () =>
 
 
     /**
-     * This function is responsible for creating and opening the interactive 3D visualization.
-     * It dynamically generates a complete HTML file as a string, injects the necessary
-     * simulation data into it, and then opens this generated content in a new browser window.
-     * This approach keeps the visualization code entirely self-contained.
+     * Creates and opens the 3D visualization window with a specified animation.
+     * It generates a complete HTML file as a string, injects simulation data and
+     * animation logic into it, and opens it in a new browser window.
      */
-    function _openVisualizationWindow() 
+    function _openVisualizationWindow(strAnimationType) 
     {
-        // First, we perform a critical safety check. If there are no results stored from the
-        // last simulation, we inform the user and stop the function immediately.
         if (!g_objLastResults) 
         {
             alert("No simulation data available to visualize.");
             return;
         }
 
-        // We extract the vehicle information and the list of packed items from the stored results.
-        // This is the specific data needed to build our 3D scene.
-        const { vehicle_info, packed_items } = g_objLastResults;
+        const { vehicle_info, packed_items, unloading_sequence } = g_objLastResults;
         
-        // This is the core of the function. We define a very long string that contains the entire
-        // source code for the new pop-up window. Using backticks (`) allows us to create a
-        // multi-line string and easily embed our simulation variables directly into it using ${...}.
         const strHtmlContent = `
             <!DOCTYPE html>
             <html lang="en">
             <head>
                 <meta charset="UTF-8">
-                <title>3D Packing Visualization</title>
-                <!-- This section defines the style and appearance of the elements in our 3D view window. -->
+                <title>3D Packing Visualization - ${strAnimationType.charAt(0).toUpperCase() + strAnimationType.slice(1)}</title>
                 <style>
                     body { margin: 0; overflow: hidden; font-family: sans-serif; }
                     canvas { display: block; }
                     .info-panel {
                         position: absolute; top: 10px; padding: 10px; background: rgba(0, 0, 0, 0.7);
                         color: white; border-radius: 5px; font-size: 14px; line-height: 1.5; pointer-events: none;
+                        max-width: 250px;
+                    }
+                    .info-panel.status-panel {
+                        top: auto; bottom: 10px; left: 10px; background: rgba(40, 44, 52, 0.8);
+                        font-size: 16px; border: 1px solid #e08128;
                     }
                     #item-info-panel { left: 10px; display: none; }
                     #item-info-panel strong { color: #e08128; }
@@ -716,213 +722,210 @@ document.addEventListener("DOMContentLoaded", () =>
                 </style>
             </head>
             <body>
-                <!-- These are the HTML panels that will display information on top of our 3D canvas. -->
                 <div id="item-info-panel" class="info-panel"></div>
+                <div id="status-panel" class="info-panel status-panel" style="display: none;"></div>
                 <div id="controls-panel" class="info-panel">
                     <b>Controls:</b> Left-Click to Rotate, Right-Click to Pan, Scroll to Zoom.
                     <br/><button id="reset-view-btn">Reset View</button>
                 </div>
 
-                <!-- We include the required Three.js library files from a trusted online source (CDN). -->
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>
                 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"><\/script>
                 
-                <!-- This is the main script that will run inside the new window to create the 3D scene. -->
                 <script>
+                    const ANIMATION_TYPE = '${strAnimationType}';
                     // === SCENE SETUP ===
-                    // A "scene" is the top-level container in Three.js; it holds all our objects, lights, and cameras.
                     const objScene = new THREE.Scene();
-                    // We set a dark background color for our scene.
                     objScene.background = new THREE.Color(0x282c34);
-                    // The "camera" is our eye in the 3D world. A PerspectiveCamera mimics how the human eye sees.
                     const objCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 20000);
-                    // The "renderer" is what takes the scene and camera and draws the result onto the screen (an HTML canvas).
-                    const objRenderer = new THREE.WebGLRenderer({ antialias: true }); // 'antialias' makes edges smoother.
-                    // We set the renderer's size to match the full browser window.
+                    const objRenderer = new THREE.WebGLRenderer({ antialias: true });
                     objRenderer.setSize(window.innerWidth, window.innerHeight);
-                    // We add the renderer's canvas element to our HTML body.
                     document.body.appendChild(objRenderer.domElement);
 
                     // === CONTROLS AND LIGHTING ===
-                    // "OrbitControls" allow the user to interact with the scene using the mouse (rotate, zoom, pan).
                     const objControls = new THREE.OrbitControls(objCamera, objRenderer.domElement);
-                    // "AmbientLight" provides a soft, general light that illuminates everything in the scene equally.
                     const objAmbientLight = new THREE.AmbientLight(0xffffff, 0.6);
                     objScene.add(objAmbientLight);
-                    // "DirectionalLight" acts like the sun, providing light from a specific direction, which creates shadows and highlights.
                     const objDirectionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-                    objDirectionalLight.position.set(200, 500, 300); // We position the light high up.
+                    objDirectionalLight.position.set(200, 500, 300);
                     objScene.add(objDirectionalLight);
 
                     // === VEHICLE CONTAINER CREATION ===
-                    // We get the vehicle's dimensions from our injected data.
                     const fltVehicleW = ${vehicle_info.width};
                     const fltVehicleH = ${vehicle_info.height};
                     const fltVehicleD = ${vehicle_info.depth};
-                    // We create a "geometry" which defines the shape (a box) of our container.
                     const objContainerGeom = new THREE.BoxGeometry(fltVehicleW, fltVehicleH, fltVehicleD);
-                    // "EdgesGeometry" creates a wireframe from the box geometry.
                     const objContainerEdges = new THREE.EdgesGeometry(objContainerGeom);
-                    // We create a "material" (what the wireframe looks like) and combine it with the edges to create a visible object.
                     const objContainerLines = new THREE.LineSegments(objContainerEdges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 }));
-                    // We calculate the center point of our vehicle.
                     const objContainerCenter = new THREE.Vector3(fltVehicleW / 2, fltVehicleH / 2, fltVehicleD / 2);
-                    // We position the container's wireframe to be centered in our scene.
                     objContainerLines.position.copy(objContainerCenter);
                     objScene.add(objContainerLines);
                     
                     // === PACKAGE COLORING LOGIC ===
-                    // This function generates a unique, consistent color for each package based on its ID.
-                    const objColorCache = {}; // We store colors here to avoid recalculating them.
+                    const objColorCache = {};
                     function getDeterministicColor(strId) {
                         if (!objColorCache[strId]) {
                             let intHash = 0;
                             for (let i = 0; i < strId.length; i++) {
                                 intHash = strId.charCodeAt(i) + ((intHash << 5) - intHash);
-                                intHash = intHash & intHash; // This is a bitwise operation to keep the number manageable.
+                                intHash = intHash & intHash;
                             }
-                            const intHue = Math.abs(intHash % 360); // We use the hash to pick a color hue (0-359).
+                            const intHue = Math.abs(intHash % 360);
                             objColorCache[strId] = new THREE.Color(\`hsl(\${intHue}, 80%, 60%)\`);
                         }
                         return objColorCache[strId];
                     }
 
                     // === PACKAGE MESH CREATION ===
-                    // This section creates the 3D box for each individual package.
-                    const arrPackageMeshes = []; // An array to hold all the package objects for later reference (like for clicking).
+                    const arrPackageMeshes = [];
+                    const mapItemMeshes = new Map(); // Use a Map for easy ID-to-mesh lookup.
                     const arrPackedItems = ${JSON.stringify(packed_items)};
                     arrPackedItems.forEach(objItem => {
-                        // CRITICAL: A final safety check to ensure we only render items with valid, positive dimensions.
                         if (objItem.width > 0 && objItem.height > 0 && objItem.depth > 0) {
-                            // We make the visual box slightly smaller than its real size to create small gaps, making individual boxes easier to see.
                             const FLT_VISUAL_SCALE = 0.999;
-                            // Define the shape (geometry) of the package box.
                             const objItemGeom = new THREE.BoxGeometry(
                                 objItem.width * FLT_VISUAL_SCALE, objItem.height * FLT_VISUAL_SCALE, objItem.depth * FLT_VISUAL_SCALE
                             );
-                            // Define the appearance (material) of the box, using our color function.
-                            const objItemMaterial = new THREE.MeshLambertMaterial({ color: getDeterministicColor(objItem.id) });
-                            // A "mesh" is the final object, combining a shape (geometry) with an appearance (material).
+                            const objItemMaterial = new THREE.MeshLambertMaterial({ color: getDeterministicColor(objItem.id), transparent: true });
                             const objItemMesh = new THREE.Mesh(objItemGeom, objItemMaterial);
-                            // We set the position of the box inside the container based on the simulation results.
                             objItemMesh.position.set(
                                 objItem.position_x + objItem.width / 2,
                                 objItem.position_y + objItem.height / 2,
                                 objItem.position_z + objItem.depth / 2
                             );
-                            objItemMesh.userData = objItem; // We attach the original package data to the 3D object itself for easy access later.
-                            objScene.add(objItemMesh);
+                            objItemMesh.userData = objItem;
+                            
+                            // For loading animation, items start invisible and are added later.
+                            if (ANIMATION_TYPE !== 'load') {
+                                objScene.add(objItemMesh);
+                            }
+                            
                             arrPackageMeshes.push(objItemMesh);
+                            mapItemMeshes.set(objItem.id, objItemMesh);
                         }
                     });
                     
                     // === INITIAL CAMERA POSITION ===
-                    // We set a fixed viewing angle relative to the container's dimensions to match the
-                    // requested upper-front-left perspective, with a slight zoom.
-                    const fltZoomFactor = 1.05; // A smaller number (e.g., 1.0) zooms in more. A larger number (e.g., 2.0) zooms out.
+                    const fltZoomFactor = 1.05;
                     objCamera.position.x = objContainerCenter.x - (fltVehicleW / fltZoomFactor);
                     objCamera.position.y = objContainerCenter.y + ((fltVehicleH / fltZoomFactor) + 10);
-                    objCamera.position.z = objContainerCenter.z - ((fltVehicleD / fltZoomFactor) + 80); // Negative Z to see the 'Left 
-                    // We tell the camera controls to look at the center of the container.
+                    objCamera.position.z = objContainerCenter.z - ((fltVehicleD / fltZoomFactor) + 80);
                     objControls.target.copy(objContainerCenter);
-                    // Save this initial view so the "Reset View" button knows where to return to.
                     objControls.saveState();
 
-                    // === INTERACTIVITY AND LABELS ===
-                    // "Raycaster" is a tool in Three.js used to detect which object the mouse is pointing at.
+                    // === INTERACTIVITY AND UI ===
                     const objRaycaster = new THREE.Raycaster();
-                    const objMouse = new THREE.Vector2(); // A variable to store the mouse's current X/Y coordinates.
-                    let objSelectedObject = null; // A variable to remember which object is currently selected.
-                    // A special material to make the selected package glow yellow.
+                    const objMouse = new THREE.Vector2();
+                    let objSelectedObject = null;
                     const objHighlightMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFF00, transparent: true, opacity: 0.8 });
-                    const objInfoDiv = document.getElementById('item-info-panel'); // Reference to our HTML info panel.
+                    const objInfoDiv = document.getElementById('item-info-panel');
+                    const objStatusDiv = document.getElementById('status-panel');
                     
-                    // A helper function to create text labels that float in the 3D space.
-                    function createTextSprite(strMessage, objPosition, intFontSize = 14) {
-                        const objCanvas = document.createElement('canvas');
-                        const objContext = objCanvas.getContext('2d');
-                        objContext.font = \`Bold \${intFontSize}px Arial\`;
-                        const fltTextWidth = objContext.measureText(strMessage).width;
-                        objCanvas.width = fltTextWidth + 20;
-                        objCanvas.height = intFontSize + 20;
-                        
-                        objContext.font = \`Bold \${intFontSize}px Arial\`;
-                        objContext.fillStyle = 'white';
-                        objContext.textAlign = 'center';
-                        objContext.textBaseline = 'middle';
-                        objContext.fillText(strMessage, objCanvas.width / 2, objCanvas.height / 2);
-                        
-                        const objTexture = new THREE.CanvasTexture(objCanvas);
-                        const objSpriteMaterial = new THREE.SpriteMaterial({ map: objTexture });
-                        const objSprite = new THREE.Sprite(objSpriteMaterial);
-                        objSprite.scale.set(objCanvas.width, objCanvas.height, 1.0);
-                        objSprite.position.copy(objPosition);
-                        objScene.add(objSprite);
-                    }
-
-                    // Create and place all the orientation labels around the container.
-                    const INT_LABEL_OFFSET = 30; // How far from the container the labels should be.
-                    createTextSprite('Back', new THREE.Vector3(fltVehicleW + INT_LABEL_OFFSET, objContainerCenter.y, objContainerCenter.z));
-                    createTextSprite('Front', new THREE.Vector3(-INT_LABEL_OFFSET, objContainerCenter.y, objContainerCenter.z));
-                    createTextSprite('Top', new THREE.Vector3(objContainerCenter.x, fltVehicleH + INT_LABEL_OFFSET, objContainerCenter.z));
-                    createTextSprite('Bottom', new THREE.Vector3(objContainerCenter.x, -INT_LABEL_OFFSET, objContainerCenter.z));
-                    createTextSprite('Right Side', new THREE.Vector3(objContainerCenter.x, objContainerCenter.y, fltVehicleD + INT_LABEL_OFFSET));
-                    createTextSprite('Left Side', new THREE.Vector3(objContainerCenter.x, objContainerCenter.y, -INT_LABEL_OFFSET));
-                    
-                    // Setup the click listener for the reset button.
                     document.getElementById('reset-view-btn').addEventListener('click', () => { objControls.reset(); });
                     
-                    // Add an event listener that fires whenever the user clicks in the window.
                     window.addEventListener('click', (event) => {
-                        // We convert the mouse's screen coordinates (in pixels) to Three.js's normalized coordinates (-1 to +1).
                         objMouse.x = (event.clientX / window.innerWidth) * 2 - 1;
                         objMouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
-                        // We tell the raycaster to shoot a "ray" from the camera through the mouse's position into the scene.
                         objRaycaster.setFromCamera(objMouse, objCamera);
-                        // We check if this ray intersects with any of our package meshes.
-                        const arrIntersects = objRaycaster.intersectObjects(arrPackageMeshes);
+                        const arrIntersects = objRaycaster.intersectObjects(arrPackageMeshes, false); // Don't check descendants
                         
-                        // First, if an object was previously selected, we restore its original color.
                         if (objSelectedObject) {
                             objSelectedObject.material = objSelectedObject.userData.originalMaterial;
                             objSelectedObject = null;
                         }
-                        // We hide the info panel.
                         objInfoDiv.style.display = 'none';
                         
-                        // If our ray hit one or more objects...
-                        if (arrIntersects.length > 0) {
-                            const objIntersected = arrIntersects[0].object; // We take the closest object that was hit.
-                            objSelectedObject = objIntersected; // We mark it as the currently selected object.
-                            objSelectedObject.userData.originalMaterial = objSelectedObject.material; // We save its original material.
-                            objSelectedObject.material = objHighlightMaterial; // We apply the yellow highlight material.
-                            
-                            const objData = objIntersected.userData; // Get the package data we stored earlier.
-                            // We make the info panel visible and populate it with the item's details.
+                        if (arrIntersects.length > 0 && arrIntersects[0].object.visible) {
+                            const objIntersected = arrIntersects[0].object;
+                            objSelectedObject = objIntersected;
+                            objSelectedObject.userData.originalMaterial = objSelectedObject.material;
+                            objSelectedObject.material = objHighlightMaterial;
+                            const objData = objIntersected.userData;
                             objInfoDiv.style.display = 'block';
                             objInfoDiv.innerHTML = \`
                                 <strong>Product ID:</strong> \${objData.id}<br>
                                 <strong>Volume:</strong> \${Math.round(objData.volume).toLocaleString()} cm³<br>
-                                <strong>Service Time:</strong> \${objData.service_time} s<br>
                                 <strong>Dimensions (W×H×D):</strong> \${objData.width}×\${objData.height}×\${objData.depth} cm
                             \`;
                         }
                     });
 
-                    // === RENDER LOOP ===
-                    // This is the main animation loop. 'requestAnimationFrame' creates a loop that calls the 'animate'
-                    // function roughly 60 times per second, creating a smooth visual experience.
-                    function animate() {
-                        requestAnimationFrame(animate); // Tell the browser we want to run this function again on the next frame.
-                        objControls.update(); // Update the controls (this is necessary if auto-rotation or damping is enabled).
-                        objRenderer.render(objScene, objCamera); // Re-draw the scene from the camera's current perspective.
+                    // === ANIMATION LOGIC ===
+                    function runLoadingAnimation() {
+                        let intLoadIndex = 0;
+                        objStatusDiv.style.display = 'block';
+                        
+                        function animateLoadStep() {
+                            if (intLoadIndex < arrPackageMeshes.length) {
+                                const mesh = arrPackageMeshes[intLoadIndex];
+                                objScene.add(mesh); // Add the mesh to the scene
+                                objStatusDiv.innerHTML = \`Loading Item \${intLoadIndex + 1} of \${arrPackageMeshes.length}<br><strong>ID:</strong> \${mesh.userData.id}\`;
+                                intLoadIndex++;
+                                setTimeout(animateLoadStep, 100);
+                            } else {
+                                objStatusDiv.innerHTML = "Loading Complete!";
+                                setTimeout(() => objStatusDiv.style.display = 'none', 2000);
+                            }
+                        }
+                        animateLoadStep();
                     }
-                    animate(); // Start the loop.
+
+                    function runUnloadingAnimation() {
+                        const arrUnloadingSequence = ${JSON.stringify(unloading_sequence || [])};
+                        let intUnloadIndex = 0;
+                        objStatusDiv.style.display = 'block';
+
+                        function animateUnloadStep() {
+                            if (intUnloadIndex < arrUnloadingSequence.length) {
+                                const step = arrUnloadingSequence[intUnloadIndex];
+                                const mesh = mapItemMeshes.get(step.item_id);
+
+                                if (mesh) {
+                                    if (step.action === 'relocate') {
+                                        objStatusDiv.innerHTML = \`Relocating Item (\${intUnloadIndex + 1} / \${arrUnloadingSequence.length})<br><strong>ID:</strong> \${mesh.userData.id}\`;
+                                        const originalMaterial = mesh.material;
+                                        mesh.material = new THREE.MeshLambertMaterial({ color: 0x808080, transparent: true, opacity: 0.9 });
+                                        setTimeout(() => { 
+                                            mesh.visible = false;
+                                            mesh.material = originalMaterial; // Restore for potential re-selection
+                                        }, 300);
+                                    } else { // unload
+                                        objStatusDiv.innerHTML = \`Unloading Item (\${intUnloadIndex + 1} / \${arrUnloadingSequence.length})<br><strong>ID:</strong> \${mesh.userData.id}\`;
+                                        const originalMaterial = mesh.material;
+                                        mesh.material = new THREE.MeshLambertMaterial({ color: 0x28a745, transparent: true, opacity: 0.9 });
+                                        setTimeout(() => { 
+                                            mesh.visible = false;
+                                            mesh.material = originalMaterial;
+                                        }, 300);
+                                    }
+                                }
+                                intUnloadIndex++;
+                                setTimeout(animateUnloadStep, 400);
+                            } else {
+                                objStatusDiv.innerHTML = "Unloading Complete!";
+                                setTimeout(() => objStatusDiv.style.display = 'none', 2000);
+                            }
+                        }
+                        animateUnloadStep();
+                    }
+
+                    // === RENDER LOOP AND INITIALIZATION ===
+                    function animate() {
+                        requestAnimationFrame(animate);
+                        objControls.update();
+                        objRenderer.render(objScene, objCamera);
+                    }
+                    animate();
+
+                    // Start the correct animation after a brief delay for the window to open.
+                    setTimeout(() => {
+                        if (ANIMATION_TYPE === 'load') runLoadingAnimation();
+                        else if (ANIMATION_TYPE === 'unload') runUnloadingAnimation();
+                    }, 500);
                     
-                    // This ensures that if the user resizes the browser window, our 3D scene will resize to match.
                     window.addEventListener('resize', () => {
                         objCamera.aspect = window.innerWidth / window.innerHeight;
-                        objCamera.updateProjectionMatrix(); // We must update the camera's projection matrix after changing its aspect ratio.
+                        objCamera.updateProjectionMatrix();
                         objRenderer.setSize(window.innerWidth, window.innerHeight);
                     }, false);
                 <\/script>
@@ -930,23 +933,19 @@ document.addEventListener("DOMContentLoaded", () =>
             </html>
         `;
         
-        // This command opens a new browser window or tab.
         const objVizWindow = window.open("", "3D Visualization", "width=900,height=700");
-        
-        // This series of commands writes our dynamically generated HTML content directly into the new window.
         objVizWindow.document.open();
         objVizWindow.document.write(strHtmlContent);
         objVizWindow.document.close();
 
-        // To prevent users from opening many visualization windows, we temporarily disable the button after one is opened.
-        g_objVisualizeBtn.disabled = true;
+        const bothAnimButtons = [g_objAnimateLoadBtn, g_objAnimateUnloadBtn];
+        bothAnimButtons.forEach(btn => btn.disabled = true);
 
-        // We set up a simple timer that checks every half-second to see if the user has closed the visualization window.
         const intCheckWindowClosedInterval = setInterval(() => {
             if (objVizWindow.closed) {
-                clearInterval(intCheckWindowClosedInterval); // Once closed, we stop the timer.
-                g_objVisualizeBtn.disabled = false; // We re-enable the "Visualize Packing" button.
-                console.log("Visualization window closed, button re-enabled.");
+                clearInterval(intCheckWindowClosedInterval);
+                bothAnimButtons.forEach(btn => btn.disabled = false);
+                console.log("Visualization window closed, buttons re-enabled.");
             }
         }, 500);
     }

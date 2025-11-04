@@ -792,6 +792,7 @@ document.addEventListener("DOMContentLoaded", () =>
                     let packed_items = ${JSON.stringify(packed_items)};
                     const deliverySequence = ${JSON.stringify(deliverySequence)};
                     const allPackageInfo = ${JSON.stringify(allPackageInfo)};
+                    let active_tweens = [];
 
                     const objScene = new THREE.Scene();
                     objScene.background = new THREE.Color(0x282c34);
@@ -839,47 +840,50 @@ document.addEventListener("DOMContentLoaded", () =>
                         const objItemGeom = new THREE.BoxGeometry(objItem.width * FLT_VISUAL_SCALE, objItem.height * FLT_VISUAL_SCALE, objItem.depth * FLT_VISUAL_SCALE);
                         const objItemMaterial = new THREE.MeshLambertMaterial({ color: getDeterministicColor(objItem.id), transparent: true });
                         const objItemMesh = new THREE.Mesh(objItemGeom, objItemMaterial);
-                        objItemMesh.position.set(
-                            objItem.position_x + objItem.width / 2,
-                            objItem.position_y + objItem.height / 2,
-                            objItem.position_z + objItem.depth / 2
-                        );
-                        objItemMesh.userData = { ...objItem, originalMaterial: objItemMaterial };
+                        // The backend position is the corner, Three.js uses the center.
+                        const centered_pos = {
+                            x: objItem.position_x + objItem.width / 2,
+                            y: objItem.position_y + objItem.height / 2,
+                            z: objItem.position_z + objItem.depth / 2,
+                        };
+                        objItemMesh.position.set(centered_pos.x, centered_pos.y, centered_pos.z);
+                        objItemMesh.userData = { ...objItem, originalMaterial: objItemMaterial, centered_pos: centered_pos };
                         return objItemMesh;
                     }
 
                     const fltZoomFactor = 1.05;
-                    objCamera.position.x = objContainerCenter.x - (fltVehicleW / fltZoomFactor);
-                    objCamera.position.y = objContainerCenter.y + ((fltVehicleH / fltZoomFactor) + 10);
-                    objCamera.position.z = objContainerCenter.z - ((fltVehicleD / fltZoomFactor) + 80);
+                    objCamera.position.set(
+                        objContainerCenter.x,
+                        objContainerCenter.y + fltVehicleH,
+                        objContainerCenter.z + fltVehicleD * 1.5
+                    );
                     objControls.target.copy(objContainerCenter);
                     objControls.saveState();
                     
                     function createTextSprite(strMessage, objPosition) {
                          const objCanvas = document.createElement('canvas');
                         const objContext = objCanvas.getContext('2d');
-                        objContext.font = \`Bold 14px Arial\`;
+                        objContext.font = \`Bold 16px Arial\`;
                         const fltTextWidth = objContext.measureText(strMessage).width;
                         objCanvas.width = fltTextWidth + 20;
-                        objCanvas.height = 34;
-                        
-                        objContext.font = \`Bold 14px Arial\`;
-                        objContext.fillStyle = 'white';
+                        objCanvas.height = 40;
+                        objContext.font = \`Bold 16px Arial\`;
+                        objContext.fillStyle = 'rgba(255, 255, 255, 0.8)';
                         objContext.textAlign = 'center';
                         objContext.textBaseline = 'middle';
                         objContext.fillText(strMessage, objCanvas.width / 2, objCanvas.height / 2);
-                        
                         const objTexture = new THREE.CanvasTexture(objCanvas);
                         const objSpriteMaterial = new THREE.SpriteMaterial({ map: objTexture });
                         const objSprite = new THREE.Sprite(objSpriteMaterial);
-                        objSprite.scale.set(objCanvas.width, objCanvas.height, 1.0);
+                        objSprite.scale.set(objCanvas.width / 2, objCanvas.height / 2, 1.0);
                         objSprite.position.copy(objPosition);
                         objScene.add(objSprite);
                     }
 
-                    const INT_LABEL_OFFSET = 30;
-                    createTextSprite('Back', new THREE.Vector3(fltVehicleW + INT_LABEL_OFFSET, objContainerCenter.y, objContainerCenter.z));
-                    createTextSprite('Front', new THREE.Vector3(-INT_LABEL_OFFSET, objContainerCenter.y, objContainerCenter.z));
+                    const INT_LABEL_OFFSET = 40;
+                    // MODIFICATION: Added "Back" label back as requested.
+                    createTextSprite('Front (Door)', new THREE.Vector3(fltVehicleW + INT_LABEL_OFFSET, objContainerCenter.y, objContainerCenter.z));
+                    createTextSprite('Back', new THREE.Vector3(-INT_LABEL_OFFSET, objContainerCenter.y, objContainerCenter.z));
                     createTextSprite('Top', new THREE.Vector3(objContainerCenter.x, fltVehicleH + INT_LABEL_OFFSET, objContainerCenter.z));
                     createTextSprite('Bottom', new THREE.Vector3(objContainerCenter.x, -INT_LABEL_OFFSET, objContainerCenter.z));
                     createTextSprite('Right Side', new THREE.Vector3(objContainerCenter.x, objContainerCenter.y, fltVehicleD + INT_LABEL_OFFSET));
@@ -898,6 +902,28 @@ document.addEventListener("DOMContentLoaded", () =>
                         return 1100 - (speedSlider.value * 100);
                     }
 
+                    // Simple tweening function for animations
+                    function tween(obj, to, duration, onUpdate, onComplete) {
+                         const from = {};
+                         for (const key in to) from[key] = obj[key];
+                         const start = performance.now();
+                         function animate() {
+                             const now = performance.now();
+                             let t = (now - start) / duration;
+                             if (t > 1) t = 1;
+                             for (const key in to) {
+                                 obj[key] = from[key] + (to[key] - from[key]) * t;
+                             }
+                             if(onUpdate) onUpdate();
+                             if (t < 1) {
+                                 requestAnimationFrame(animate);
+                             } else if(onComplete) {
+                                onComplete();
+                             }
+                         }
+                         requestAnimationFrame(animate);
+                    }
+
                     if (mode === 'static') {
                         packed_items.forEach(item => {
                             const mesh = createPackageMesh(item);
@@ -908,32 +934,46 @@ document.addEventListener("DOMContentLoaded", () =>
                         });
                     } else if (mode === 'load') {
                         let currentItemIndex = 0;
-                        packed_items.sort((a,b) => a.position_x > b.position_x ? -1 : 1); // back to front loading
+                         // Sort from back-to-front, bottom-to-top to match a plausible loading sequence
+                        packed_items.sort((a,b) => (a.position_x - b.position_x) || (a.position_y - b.position_y) || (a.position_z - b.position_z));
+                        
                         function nextLoadStep() {
                             if (currentItemIndex >= packed_items.length) {
                                 animStatus.innerHTML = \`Loading Complete: \${packed_items.length} items loaded.\`;
                                 isPlaying = false;
                                 playPauseBtn.textContent = 'Replay';
-                                currentItemIndex = 0; // for replay
                                 return;
                             }
-                            const item = packed_items[currentItemIndex];
-                            const mesh = createPackageMesh(item);
+                            const itemData = packed_items[currentItemIndex];
+                            const mesh = createPackageMesh(itemData);
                             if (mesh) {
-                                packageMeshes[item.id] = mesh;
+                                packageMeshes[itemData.id] = mesh;
+                                const final_y = mesh.position.y;
+                                mesh.position.y = fltVehicleH + itemData.height; // Start from top
                                 objScene.add(mesh);
+                                // Animate the drop
+                                tween(mesh.position, { y: final_y }, 300, null, () => {
+                                     if (isPlaying && currentItemIndex < packed_items.length) {
+                                        animationTimeout = setTimeout(nextLoadStep, getAnimationDelay()/2);
+                                     } else if (currentItemIndex >= packed_items.length){
+                                        animStatus.innerHTML = \`Loading Complete: \${packed_items.length} items loaded.\`;
+                                        isPlaying = false;
+                                        playPauseBtn.textContent = 'Replay';
+                                     }
+                                });
                             }
                             currentItemIndex++;
                             progressBar.style.width = \`\${(currentItemIndex / packed_items.length) * 100}%\`;
                             animStatus.innerHTML = \`Loading Item \${currentItemIndex} of \${packed_items.length}...\`;
                             
-                            if (isPlaying) {
-                                animationTimeout = setTimeout(nextLoadStep, getAnimationDelay());
-                            }
+                            // To prevent runaway recursion, only schedule next step inside tween completion
+                            if (!isPlaying) { clearTimeout(animationTimeout) }
                         }
+                        
                         playPauseBtn.onclick = () => {
                            if (playPauseBtn.textContent === 'Replay') {
                                 Object.values(packageMeshes).forEach(m => objScene.remove(m));
+                                Object.keys(packageMeshes).forEach(k => delete packageMeshes[k]);
                                 currentItemIndex = 0;
                                 progressBar.style.width = '0%';
                            }
@@ -943,93 +983,160 @@ document.addEventListener("DOMContentLoaded", () =>
                         };
                     } else if (mode === 'unload') {
                          packed_items.forEach(item => {
-                            const mesh = createPackageMesh(item);
-                            if(mesh) packageMeshes[item.id] = mesh;
+                             const mesh = createPackageMesh(item);
+                             if(mesh) packageMeshes[item.id] = mesh;
                          });
-                         Object.values(packageMeshes).forEach(m => objScene.add(m));
+                         const itemsInBin = { ...packageMeshes };
+                         Object.values(itemsInBin).forEach(m => objScene.add(m));
 
-                        let totalUnloadSteps = deliverySequence.length;
-                        let currentStepIndex = 0;
                         let relocationCount = 0;
 
-                        function nextUnloadStep() {
-                            if (currentStepIndex >= deliverySequence.length) {
-                                animStatus.innerHTML = \`Unloading Complete. Total Relocations: \${relocationCount}\`;
-                                isPlaying = false;
-                                playPauseBtn.textContent = 'Replay';
+                        // --- REVISED GRAVITY SIMULATION FOR UNLOADING ---
+                        function _applyGravityAnimation(onComplete) {
+                             const remainingMeshes = Object.values(itemsInBin);
+                             let itemsToMove = [];
+                             let movedInPass;
+                             do {
+                                 movedInPass = false;
+                                 remainingMeshes.sort((a,b) => a.userData.position_y - b.userData.position_y);
+                                 for(const mesh of remainingMeshes) {
+                                     const iData = mesh.userData;
+                                     let highestSupportY = 0;
+                                     for(const otherMesh of remainingMeshes) {
+                                         if(otherMesh === mesh) continue;
+                                         const oData = otherMesh.userData;
+                                         if ( (oData.position_y + oData.height) < iData.position_y + 0.1) {
+                                              if (iData.position_x < oData.position_x + oData.width && oData.position_x < iData.position_x + iData.width &&
+                                                  iData.position_z < oData.position_z + oData.depth && oData.position_z < iData.position_z + iData.depth)
+                                              {
+                                                   highestSupportY = Math.max(highestSupportY, oData.position_y + oData.height);
+                                              }
+                                         }
+                                     }
+                                     if(Math.abs(iData.position_y - highestSupportY) > 0.1) {
+                                         const from_y = iData.position_y;
+                                         iData.position_y = highestSupportY;
+                                         const to_y = highestSupportY + iData.height/2;
+                                         mesh.userData.centered_pos.y = to_y; // Update centered pos as well
+                                         itemsToMove.push({mesh, from_y, to_y});
+                                         movedInPass = true;
+                                     }
+                                 }
+                             } while (movedInPass);
+                             
+                             if (itemsToMove.length === 0) {
+                                if(onComplete) onComplete();
+                                return;
+                             }
+                             
+                             let completedTweens = 0;
+                             for (const move of itemsToMove) {
+                                tween(move.mesh.position, {y: move.to_y}, 400, null, () => {
+                                    completedTweens++;
+                                    if(completedTweens === itemsToMove.length && onComplete) onComplete();
+                                });
+                             }
+                        }
+
+                        let animationQueue = [];
+                        let isProcessingQueue = false;
+
+                        function buildAnimationQueue() {
+                            const simBin = JSON.parse(JSON.stringify(packed_items)).reduce((m, p) => {m[p.id]=p; return m}, {});
+                            
+                            for (const stopId of deliverySequence) {
+                                let itemsForStop = Object.values(simBin).filter(p => allPackageInfo[p.id]?.stop_id === stopId)
+                                .sort((a,b) => (b.position_x - a.position_x) || (b.position_y - a.position_y));
+
+                                for(const target of itemsForStop) {
+                                     if(!simBin[target.id]) continue;
+                                     
+                                     const { position_x: tx, position_y: ty, position_z: tz, width: tdx, height: tdy, depth: tdz } = target;
+                                     const blockers = Object.values(simBin).filter(p => {
+                                         if (!p || p.id === target.id) return false;
+                                         const { position_x: ox, position_y: oy, position_z: oz, width: odx, height: ody, depth: odz } = p;
+                                         return (ox > tx) && (ty < oy + ody) && (oy < ty + tdy) && (tz < oz + odz) && (oz < tz + tdz);
+                                     }).sort((a,b) => b.position_x - a.position_x);
+
+                                     for(const blocker of blockers) {
+                                         if (simBin[blocker.id]) {
+                                            animationQueue.push({ action: 'relocate', item: blocker });
+                                            delete simBin[blocker.id];
+                                         }
+                                     }
+                                     animationQueue.push({ action: 'deliver', item: target });
+                                     delete simBin[target.id];
+                                }
+                            }
+                        }
+
+                        function processAnimationQueue() {
+                            if (!isPlaying || isProcessingQueue) return;
+                            
+                            if (animationQueue.length === 0) {
+                                _applyGravityAnimation(() => {
+                                    animStatus.innerHTML = \`Unloading Complete. Total Relocations: \${relocationCount}\`;
+                                    isPlaying = false;
+                                    playPauseBtn.textContent = 'Replay';
+                                });
                                 return;
                             }
                             
-                            const targetStopId = deliverySequence[currentStepIndex];
-                            animStatus.innerHTML = \`Unloading stop \${targetStopId}. Relocations: \${relocationCount}\`;
+                            isProcessingQueue = true;
+                            const step = animationQueue.shift();
+                            const mesh = itemsInBin[step.item.id];
 
-                            const itemsForThisStop = Object.values(packageMeshes).filter(m => allPackageInfo[m.userData.id]?.stop_id === targetStopId)
-                                .sort((a,b) => a.position.x < b.position.x ? -1 : 1); // Front to back
-
-                            function processItem() {
-                                if (itemsForThisStop.length === 0) {
-                                    currentStepIndex++;
-                                    progressBar.style.width = \`\${(currentStepIndex / totalUnloadSteps) * 100}%\`;
-                                    if(isPlaying) animationTimeout = setTimeout(nextUnloadStep, getAnimationDelay());
-                                    return;
-                                }
-
-                                const targetItemMesh = itemsForThisStop.shift();
-                                if (!targetItemMesh.parent) { // already removed
-                                    if(isPlaying) setTimeout(processItem, getAnimationDelay()/2);
-                                    return;
-                                }
-
-                                const tx = targetItemMesh.position.x, ty = targetItemMesh.position.y, tz = targetItemMesh.position.z;
-                                const tdx = targetItemMesh.userData.width, tdy = targetItemMesh.userData.height, tdz = targetItemMesh.userData.depth;
-
-                                let blockers = Object.values(packageMeshes).filter(otherMesh => {
-                                    if (!otherMesh.parent || otherMesh === targetItemMesh) return false;
-                                    const ox = otherMesh.position.x, oy = otherMesh.position.y, oz = otherMesh.position.z;
-                                    const odx = otherMesh.userData.width, ody = otherMesh.userData.height, odz = otherMesh.userData.depth;
-
-                                    const isInFront = (ox - odx/2) < (tx + tdx/2);
-                                    const yOverlap = (ty - tdy/2 < oy + ody/2) && (oy - ody/2 < ty + tdy/2);
-                                    const zOverlap = (tz - tdz/2 < oz + odz/2) && (oz - odz/2 < tz + tdz/2);
-                                    return isInFront && yOverlap && zOverlap;
-                                });
-                                
-                                function removeBlockers() {
-                                    if (blockers.length === 0) {
-                                         targetItemMesh.material.opacity = 0; // fade out
-                                         objScene.remove(targetItemMesh);
-                                         if(isPlaying) setTimeout(processItem, getAnimationDelay()/2);
-                                         return;
-                                    }
-                                    let blocker = blockers.shift();
-                                    relocationCount++;
-                                    animStatus.innerHTML = \`Relocating item for stop \${targetStopId}... Relocations: \${relocationCount}\`;
-                                    blocker.material.opacity = 0;
-                                    objScene.remove(blocker);
-                                    if (isPlaying) setTimeout(removeBlockers, getAnimationDelay()/3);
-                                }
-                                removeBlockers();
+                            if(!mesh){ // already removed
+                                 isProcessingQueue = false;
+                                 if (isPlaying) setTimeout(processAnimationQueue, 50);
+                                 return;
                             }
-                             processItem();
+                            
+                            if (step.action === 'relocate') {
+                                relocationCount++;
+                                animStatus.innerHTML = \`Relocating Item. Relocations: \${relocationCount}\`;
+                                objScene.remove(mesh);
+                                delete itemsInBin[step.item.id];
+                            } else {
+                                animStatus.innerHTML = \`Delivering \${step.item.id}\`;
+                                objScene.remove(mesh);
+                                delete itemsInBin[step.item.id];
+                            }
+
+                            const itemsProcessed = packed_items.length - animationQueue.length;
+                            progressBar.style.width = \`\${(itemsProcessed / packed_items.length) * 100}%\`;
+
+                             _applyGravityAnimation(() => {
+                                 isProcessingQueue = false;
+                                 if(isPlaying) animationTimeout = setTimeout(processAnimationQueue, getAnimationDelay());
+                             });
                         }
                         
                          playPauseBtn.onclick = () => {
                            if (playPauseBtn.textContent === 'Replay') {
                                 Object.values(packageMeshes).forEach(m => {
-                                    m.material.opacity = 1;
-                                    if(!m.parent) objScene.add(m);
+                                    m.material = m.userData.originalMaterial;
+                                    m.position.copy(m.userData.centered_pos);
+                                    m.userData.position_y = m.userData.centered_pos.y - m.userData.height / 2;
+                                    objScene.add(m);
                                 });
-                                currentStepIndex = 0;
+                                Object.assign(itemsInBin, packageMeshes);
                                 relocationCount = 0;
                                 progressBar.style.width = '0%';
+                                animationQueue = [];
+                                isProcessingQueue = false;
                            }
                            isPlaying = !isPlaying;
                            playPauseBtn.textContent = isPlaying ? 'Pause' : 'Play';
-                           if(isPlaying) nextUnloadStep(); else clearTimeout(animationTimeout);
+                           if(isPlaying) {
+                              if (animationQueue.length === 0 && !isProcessingQueue) buildAnimationQueue();
+                              processAnimationQueue();
+                           } else {
+                               clearTimeout(animationTimeout);
+                           }
                         };
                     }
                     
-                    // Raycasting logic for item selection
                     const objRaycaster = new THREE.Raycaster();
                     const objMouse = new THREE.Vector2();
                     let objSelectedObject = null;
@@ -1041,11 +1148,13 @@ document.addEventListener("DOMContentLoaded", () =>
                         objMouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
                         objRaycaster.setFromCamera(objMouse, objCamera);
                         
-                        const meshesForIntersect = Object.values(packageMeshes).filter(m => m.parent); // only check visible meshes
+                        const meshesForIntersect = Object.values(packageMeshes).filter(m => m.parent);
                         const arrIntersects = objRaycaster.intersectObjects(meshesForIntersect);
                         
                         if (objSelectedObject) {
-                            objSelectedObject.material = objSelectedObject.userData.originalMaterial;
+                             if (objSelectedObject.userData) {
+                                objSelectedObject.material = objSelectedObject.userData.originalMaterial;
+                             }
                             objSelectedObject = null;
                         }
                         objInfoDiv.style.display = 'none';
@@ -1063,7 +1172,6 @@ document.addEventListener("DOMContentLoaded", () =>
                             \`;
                         }
                     });
-
 
                     function animate() {
                         requestAnimationFrame(animate);
@@ -1086,10 +1194,7 @@ document.addEventListener("DOMContentLoaded", () =>
         objVizWindow.document.open();
         objVizWindow.document.write(strHtmlContent);
         objVizWindow.document.close();
-
-        // Disable the menu button while a window is open
         g_objVisualizeMenuBtn.disabled = true;
-        
         const intCheckWindowClosedInterval = setInterval(() => {
             if (objVizWindow.closed) {
                 clearInterval(intCheckWindowClosedInterval);

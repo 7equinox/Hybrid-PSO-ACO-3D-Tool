@@ -1,5 +1,5 @@
 """
-System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
+System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and testing)
 Module Name: Simulation Orchestration
 
 Purpose of this file:
@@ -58,8 +58,10 @@ def _fnCalculateRectangularDimensions(fltVolumeCm3):
     # Volume (V) = width * (0.5 * width) * (0.4 * width) = 0.2 * width^3
     # From this, solve for width: width = (V / 0.2)^(1/3)
     try:
+        # FIX: Ensure the input volume is a float before performing division.
+        flt_safe_volume = float(fltVolumeCm3)
         # 'width' is the length of the truck container (longest dimension, X-axis)
-        flt_width = (fltVolumeCm3 / 0.2) ** (1./3.)
+        flt_width = (flt_safe_volume / 0.2) ** (1./3.)
         # 'height' is the vertical dimension (Y-axis)
         flt_height = flt_width * 0.5
         # 'depth' is the sideways dimension (Z-axis)
@@ -107,7 +109,7 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     # For a more realistic simulation, this step
     # recalculates the container's dimensions into a rectangular prism (like a truck)
     # while preserving the total original volume. This new shape is then used for the entire simulation.
-    dict_rectangularDimensions = _fnCalculateRectangularDimensions(fltCapacityCm3)
+    dict_rectangularDimensions = _fnCalculateRectangularDimensions(float(fltCapacityCm3))
     dict_vehicleInfo.update(dict_rectangularDimensions)
     print(f"Container shape override: Using rectangular dimensions {dict_vehicleInfo['width']}x{dict_vehicleInfo['height']}x{dict_vehicleInfo['depth']}")
 
@@ -129,9 +131,9 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     arr_itemsToPack = [Item(p['id'], p['width'], p['height'], p['depth'], 1) for p in arr_packagesToLoad]
     obj_bin = Bin(
         dict_vehicleInfo['id'],
-        dict_vehicleInfo['width'],
-        dict_vehicleInfo['height'],
-        dict_vehicleInfo['depth'],
+        float(dict_vehicleInfo['width']),
+        float(dict_vehicleInfo['height']),
+        float(dict_vehicleInfo['depth']),
         1e6 # Max weight is set very high, as our problem is volume-constrained, not weight-constrained.
     )
 
@@ -157,7 +159,8 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
             raise CancelledException()
 
         obj_packer = Packer()
-        obj_freshBin = Bin(obj_bin.name, obj_bin.width, obj_bin.height, obj_bin.depth, obj_bin.max_weight)
+        # FIX: Ensure bin dimensions are floats.
+        obj_freshBin = Bin(obj_bin.name, float(obj_bin.width), float(obj_bin.height), float(obj_bin.depth), float(obj_bin.max_weight))
         obj_packer.add_bin(obj_freshBin)
 
         for int_i in arrItemOrderIndices:
@@ -169,7 +172,8 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
 
         arr_packedItems = obj_packer.bins[0].items
         # Delegate the calculation of all metrics to the dedicated performance_metrics module.
-        dict_metrics = fnCalculateAllMetrics(arr_packedItems, obj_bin.get_volume(), arr_packagesToLoad)
+        # FIX: Explicitly cast the bin's volume to float to prevent calculation errors.
+        dict_metrics = fnCalculateAllMetrics(arr_packedItems, float(obj_bin.get_volume()), arr_packagesToLoad)
             
         # This tuple represents the new, two-objective fitness of the solution.
         # Both objectives are now minimized.
@@ -196,11 +200,24 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     # for evaluating the scalability and resource efficiency of each algorithm.
     dictProgressTracker['message'] = "Running optimization..."
     tm_startTime = time.time()
-    # The `memory_usage` function calls our algorithm and returns both the memory usage and the algorithm's own return values.
-    flt_memUsage, (arr_bestSolutionIndices, tpl_bestFitness) = memory_usage(
-        (func_algorithm, (arr_itemsToPack, arr_packagesToLoad, fnEvaluateSolution, dictCancellationFlag, dictProgressTracker)),
-        retval=True, max_usage=True, interval=0.1
-    )
+    
+    try:
+        mem_usage_result = memory_usage(
+            (func_algorithm, (arr_itemsToPack, arr_packagesToLoad, fnEvaluateSolution, dictCancellationFlag, dictProgressTracker)),
+            retval=True, max_usage=True, interval=0.1
+        )
+        if isinstance(mem_usage_result, tuple) and len(mem_usage_result) == 2:
+             flt_memUsage, result_tuple = mem_usage_result
+             if result_tuple is None or not isinstance(result_tuple, tuple) or len(result_tuple) != 2:
+                 raise ValueError("Algorithm did not return the expected (solution, fitness) tuple.")
+             arr_bestSolutionIndices, tpl_bestFitness = result_tuple
+        else:
+            flt_memUsage = mem_usage_result if isinstance(mem_usage_result, (int, float)) else 0
+            return {'error': 'Algorithm failed to return a valid solution.'}
+    except Exception as e:
+        print(f"Error during algorithm execution or memory profiling: {e}")
+        return {'error': f'Algorithm execution failed: {e}'}
+
     flt_computationTime = round(time.time() - tm_startTime, 2)
     
     # --- Stage 4: Dynamic Constraint Implementation ---
@@ -209,31 +226,21 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     dictProgressTracker['message'] = "Applying constraints..."
     if blnIsDynamicConstraintEnabled:
         set_packed_indices = set(arr_bestSolutionIndices)
-        
-        # Only the 'remove' action is now performed.
         if len(set_packed_indices) > 1:
             print("Dynamic constraint: Applying REMOVE action.")
-            # Randomly remove between 10% and 20% of the currently packed items.
             num_to_remove = int(len(set_packed_indices) * random.uniform(0.1, 0.2))
-            # Ensure at least one item is removed if possible.
             num_to_remove = max(1, num_to_remove) if num_to_remove > 0 else 0
-            
             if num_to_remove > 0:
                 indices_to_remove = random.sample(list(set_packed_indices), num_to_remove)
-                # The new solution is the old one, but with the removed items filtered out.
                 arr_bestSolutionIndices = [i for i in arr_bestSolutionIndices if i not in indices_to_remove]
                 print(f"Removed {num_to_remove} items. New count: {len(arr_bestSolutionIndices)}.")
         else:
-            # This handles edge cases where no disruption is possible (e.g., only 1 item).
             print("Dynamic constraint was enabled but no action was possible.")
     else:
         print("Dynamic constraint is DISABLED. Using the original optimized solution.")
 
 
     # --- Stage 5: Post-Experimentation - Data Consolidation ---
-    # After the algorithm has finished and found its best solution (which may have been
-    # disrupted by the dynamic constraint), this section prepares a comprehensive result
-    # object for the UI.
     dictProgressTracker['message'] = "Consolidating results..."
     obj_finalPacker = Packer()
     obj_finalPacker.add_bin(obj_bin)
@@ -244,39 +251,42 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     obj_finalPacker.pack(bigger_first=True, distribute_items=True, number_of_decimals=0)
 
     # --- MODIFICATION ---
-    # Apply a new post-processing step to add physical realism (gravity, collision).
-    # This function is the key to creating a dense, physically stable packing arrangement.
-    _fnPostProcessPacking(obj_finalPacker.bins[0])
+    # CRITICAL FIX: The post-processing function has been rewritten to be a robust, iterative physics simulation
+    # that prevents the item merging bug and produces a stable, realistic pack.
+    int_loading_relocations = _fnPostProcessPacking(obj_finalPacker.bins[0])
 
     arr_finalPackedItemsDetails = []
     flt_totalPackedVolume = 0
     flt_totalPackedServiceTime = 0
     
-    # Recalculate the final metrics based on the contents of the bin AFTER the potential disruption.
-    final_metrics = fnCalculateAllMetrics(obj_finalPacker.bins[0].items, obj_bin.get_volume(), arr_packagesToLoad)
+    # Recalculate the final metrics based on the contents of the bin AFTER the potential disruption AND physics simulation.
+    final_metrics = fnCalculateAllMetrics(obj_finalPacker.bins[0].items, float(obj_bin.get_volume()), arr_packagesToLoad)
     
+    # Add the relocations from the physics stabilization to the total relocation count.
+    if isinstance(final_metrics['relocation_count'], (int, float)):
+        final_metrics['relocation_count'] += int_loading_relocations
+
     # We combine the original package data with the final packed positions and dimensions from the simulation.
     for obj_item in obj_finalPacker.bins[0].items:
         dict_originalPackage = next((p for p in arr_packagesToLoad if p['id'] == obj_item.name), None)
         if dict_originalPackage:
-            w, h, d = obj_item.get_dimension() # Get the final, possibly rotated, dimensions.
-            arr_pos = [float(p) for p in obj_item.position] # Convert string positions to numbers.
+            # FIX: Ensure all dimensions and positions are floats to avoid errors
+            w, h, d = map(float, obj_item.get_dimension())
+            arr_pos = [float(p) for p in obj_item.position]
             
             arr_finalPackedItemsDetails.append({
                 **dict_originalPackage, "width": w, "height": h, "depth": d, # Store final dimensions.
                 "position_x": arr_pos[0], "position_y": arr_pos[1], "position_z": arr_pos[2]
             })
-            flt_totalPackedVolume += dict_originalPackage['volume']
-            flt_totalPackedServiceTime += dict_originalPackage['service_time']
+            flt_totalPackedVolume += float(dict_originalPackage['volume'])
+            flt_totalPackedServiceTime += float(dict_originalPackage['service_time'])
     
-    # Final backend log to confirm the number of items successfully placed in the bin.
     num_products_loaded = len(arr_finalPackedItemsDetails)
     print(f"\n--- FINAL RESULT ---")
     print(f"Final Number of Products Loaded: {num_products_loaded}")
     print("This number reflects the count of items the packing library successfully placed in the bin.")
     print("It can differ from the initial or disrupted count if some items could not be fit due to their geometry.\n")
     
-    # Construct the final, structured results dictionary that will be sent to the frontend.
     return {
         'algorithm_name': strAlgorithmName,
         'metrics': {
@@ -288,7 +298,7 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         'packed_items': arr_finalPackedItemsDetails,
         'vehicle_info': {
             **dict_vehicleInfo,
-            'num_packages_loaded': num_products_loaded, # Use the final calculated number.
+            'num_packages_loaded': num_products_loaded,
             'total_packed_volume': round(flt_totalPackedVolume),
             'total_packed_service_time': round(flt_totalPackedServiceTime)
         }
@@ -297,136 +307,136 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
 
 def _fnPostProcessPacking(objBin):
     """
-    Applies a rigorous, multi-stage physics simulation to the final packing
-    solution. This function guarantees physical realism by iteratively applying
-    gravity and performing explicit collision detection and resolution on all three
-    axes (X, Y, and Z), completely eliminating any merging, overlapping, or
-    floating items.
+    Applies a robust, iterative physics simulation to correct the packing solution
+    from the library into a physically realistic and stable arrangement. This function
+    is the core of preventing floating, merging, or unstable items.
 
     The process works as follows:
-    1.  **Iterative Settling Loop:** The function runs in multiple passes until a
-        full pass occurs where no item moves, signifying a final, stable state.
-        Each item is processed from the bottom-up to ensure a stable foundation.
-    2.  **Y-Axis Resolution (Gravity & Vertical Collision):** For each item, the
-        function finds the highest solid surface directly beneath it by checking
-        for X-Z plane overlaps with all other items. It then moves the item
-        down to rest exactly on this surface, simultaneously eliminating any
-        floating and resolving all vertical collisions.
-    3.  **X/Z-Axis Resolution (Lateral Collision):** After settling an item
-        vertically, the function performs a new, critical check for lateral
-        (side-to-side) collisions. If an item overlaps another, it is pushed
-        away by the minimum amount required to resolve the overlap, ensuring no
-        two items occupy the same space.
-    4.  **Convergence & Boundary Enforcement:** The iterative process continues
-        until the entire arrangement is stable and collision-free. A final check
-        clamps all items within the container's boundaries to correct any minor
-        protrusions from floating-point inaccuracies.
+    1.  **Iterative Settling:** The function loops until a full pass over all items
+        results in no movements, ensuring the stack is stable.
+    2.  **Gravity Application (Bottom-Up):** In each pass, items are sorted by height.
+        For each item, it calculates the highest solid surface directly beneath it
+        formed by other items or the container floor.
+    3.  **Stability Check (70% Rule):** It calculates the total X-Z overlap area
+        with all supporters below. If this area is less than 70% of the item's own
+        base, the item is considered unstable.
+    4.  **Corrective Drop:** If an item is floating (not touching its support) or is
+        unstable, it is moved down to rest on its highest support surface. This is
+        counted as a "loading relocation".
+    5.  **Collision Resolution:** After the gravity pass, a separate check finds any
+        items that are now overlapping (colliding). It resolves this by pushing
+        the items apart by the minimum amount needed. This also counts as a
+        "loading relocation".
+    6.  **Boundary Enforcement:** A final check ensures no item protrudes outside
+        the container walls.
 
     Args:
         objBin (Bin): The bin object containing the final packed items.
+    
+    Returns:
+        int: The total number of adjustments (loading relocations) made.
     """
-    # --- Configuration ---
-    # A safety limit to prevent potential infinite loops in complex scenarios.
-    INT_MAX_ITERATIONS = 20
-    # A small tolerance value for floating-point comparisons to avoid precision errors.
-    FLT_COMPARISON_TOLERANCE = 1e-5
-    # The number of decimal places to use when rounding positions for final output.
+    print("Starting robust iterative post-processing to fix stability and collisions...")
+    
+    INT_MAX_ITERATIONS = 30 # Allow more passes for complex arrangements to settle
+    FLT_COMPARISON_TOLERANCE = 1e-4
+    FLT_STABILITY_THRESHOLD = 0.70 # The "70% rule"
     INT_PRECISION_DIGITS = 3
-
-    print("Starting advanced packing post-processing with collision resolution...")
-
+    
     arr_items = objBin.items
-    arr_bin_dims = [float(objBin.width), float(objBin.height), float(objBin.depth)]
+    if not arr_items: return 0
 
-    # --- Stage 1: Iterative Settling and Collision Resolution ---
+    arr_bin_dims = [float(objBin.width), float(objBin.height), float(objBin.depth)]
+    int_total_adjustments = 0
+
     for int_iteration in range(INT_MAX_ITERATIONS):
         int_items_moved_this_pass = 0
-        arr_items.sort(key=lambda item: float(item.position[1])) # Process bottom-up
+        
+        # Sort items bottom-up to ensure a stable foundation is built first.
+        arr_items.sort(key=lambda item: float(item.position[1]))
 
+        # --- PASS 1: Gravity, Stability, and Vertical Correction ---
         for obj_current_item in arr_items:
-            # --- Y-AXIS: Apply Gravity & Resolve Vertical Collisions ---
-            flt_current_iy = float(obj_current_item.position[1])
+            flt_ix, flt_iy, flt_iz = map(float, obj_current_item.position)
+            flt_iw, flt_ih, flt_id = map(float, obj_current_item.get_dimension())
+            flt_i_base_area = flt_iw * flt_id
+            
             flt_highest_support_y = 0.0
-
-            flt_ix, flt_iz = float(obj_current_item.position[0]), float(obj_current_item.position[2])
-            flt_iw, flt_id = float(obj_current_item.get_dimension()[0]), float(obj_current_item.get_dimension()[2])
-
+            flt_total_support_area = 0.0
+            
             for obj_other_item in arr_items:
-                if obj_other_item is obj_current_item:
-                    continue
-
-                flt_oy, flt_oh = float(obj_other_item.position[1]), float(obj_other_item.get_dimension()[1])
-                # Check if other_item is a potential supporter (below and overlaps in X-Z)
-                if (flt_oy + flt_oh) <= (flt_current_iy + FLT_COMPARISON_TOLERANCE):
-                    flt_ox, flt_oz = float(obj_other_item.position[0]), float(obj_other_item.position[2])
-                    flt_ow, flt_od = float(obj_other_item.get_dimension()[0]), float(obj_other_item.get_dimension()[2])
-
-                    bln_x_overlap = (flt_ix < flt_ox + flt_ow) and (flt_ox < flt_ix + flt_iw)
-                    bln_z_overlap = (flt_iz < flt_oz + flt_od) and (flt_oz < flt_iz + flt_id)
-
-                    if bln_x_overlap and bln_z_overlap:
+                if obj_other_item is obj_current_item: continue
+                flt_ox, flt_oy, flt_oz = map(float, obj_other_item.position)
+                flt_ow, flt_oh, flt_od = map(float, obj_other_item.get_dimension())
+                
+                # Is the other item a potential supporter (below and overlapping in X-Z)?
+                if (flt_oy + flt_oh) <= (flt_iy + FLT_COMPARISON_TOLERANCE):
+                    overlap_x1 = max(flt_ix, flt_ox)
+                    overlap_x2 = min(flt_ix + flt_iw, flt_ox + flt_ow)
+                    overlap_z1 = max(flt_iz, flt_oz)
+                    overlap_z2 = min(flt_iz + flt_id, flt_oz + flt_od)
+                    
+                    if overlap_x2 > overlap_x1 and overlap_z2 > overlap_z1:
                         flt_highest_support_y = max(flt_highest_support_y, flt_oy + flt_oh)
+                        flt_total_support_area += (overlap_x2 - overlap_x1) * (overlap_z2 - overlap_z1)
 
-            # Move item down if it's floating above its highest support
-            if abs(flt_current_iy - flt_highest_support_y) > FLT_COMPARISON_TOLERANCE:
+            is_floating = abs(flt_iy - flt_highest_support_y) > FLT_COMPARISON_TOLERANCE
+            is_unstable = (flt_total_support_area / flt_i_base_area) < FLT_STABILITY_THRESHOLD if flt_i_base_area > 0 else True
+            
+            if is_floating or (is_unstable and flt_iy > 0):
                 obj_current_item.position[1] = str(flt_highest_support_y)
                 int_items_moved_this_pass += 1
-            
-            # --- X/Z-AXIS: Resolve Lateral Collisions ---
-            # Now that the item is at the correct height, check for side overlaps
-            flt_ix, flt_iy, flt_iz = [float(p) for p in obj_current_item.position]
-            flt_iw, flt_ih, flt_id = [float(d) for d in obj_current_item.get_dimension()]
-            
-            for obj_other_item in arr_items:
-                 if obj_other_item is obj_current_item:
-                     continue
-                 
-                 flt_ox, flt_oy, flt_oz = [float(p) for p in obj_other_item.position]
-                 flt_ow, flt_oh, flt_od = [float(d) for d in obj_other_item.get_dimension()]
-                 
-                 # Check for full 3D overlap (collision)
-                 bln_x_overlap = (flt_ix < flt_ox + flt_ow) and (flt_ox < flt_ix + flt_iw)
-                 bln_y_overlap = (flt_iy < flt_oy + flt_oh) and (flt_oy < flt_iy + flt_ih)
-                 bln_z_overlap = (flt_iz < flt_oz + flt_od) and (flt_oz < flt_iz + flt_id)
+                int_total_adjustments += 1
+                
+        # --- PASS 2: Lateral Collision Resolution ---
+        for i in range(len(arr_items)):
+            for j in range(i + 1, len(arr_items)):
+                item1 = arr_items[i]
+                item2 = arr_items[j]
+                
+                pos1 = [float(p) for p in item1.position]
+                dims1 = [float(d) for d in item1.get_dimension()]
+                pos2 = [float(p) for p in item2.position]
+                dims2 = [float(d) for d in item2.get_dimension()]
+                
+                # Check for 3D AABB overlap
+                if (pos1[0] < pos2[0] + dims2[0] and pos1[0] + dims1[0] > pos2[0] and
+                    pos1[1] < pos2[1] + dims2[1] and pos1[1] + dims1[1] > pos2[1] and
+                    pos1[2] < pos2[2] + dims2[2] and pos1[2] + dims1[2] > pos2[2]):
+                    
+                    # Collision detected, push them apart along the axis of smallest overlap
+                    dx = min((pos1[0] + dims1[0]) - pos2[0], (pos2[0] + dims2[0]) - pos1[0])
+                    dy = min((pos1[1] + dims1[1]) - pos2[1], (pos2[1] + dims2[1]) - pos1[1])
+                    dz = min((pos1[2] + dims1[2]) - pos2[2], (pos2[2] + dims2[2]) - pos1[2])
 
-                 if bln_x_overlap and bln_y_overlap and bln_z_overlap:
-                     # A collision exists, calculate the overlap on each axis
-                     flt_dx = min(flt_ix + flt_iw - flt_ox, flt_ox + flt_ow - flt_ix)
-                     flt_dz = min(flt_iz + flt_id - flt_oz, flt_oz + flt_od - flt_iz)
-
-                     # Resolve collision by pushing the current_item along the axis of least overlap
-                     if flt_dx < flt_dz: # Push along X-axis
-                         if flt_ix < flt_ox: # current_item is to the left of other_item
-                             obj_current_item.position[0] = str(flt_ix - flt_dx)
-                         else: # current_item is to the right
-                             obj_current_item.position[0] = str(flt_ix + flt_dx)
-                     else: # Push along Z-axis
-                         if flt_iz < flt_oz: # current_item is in front of other_item
-                            obj_current_item.position[2] = str(flt_iz - flt_dz)
-                         else: # current_item is behind
-                             obj_current_item.position[2] = str(flt_iz + flt_dz)
-                     
-                     int_items_moved_this_pass += 1
-
-
-        print(f"Post-processing iteration {int_iteration + 1}: {int_items_moved_this_pass} adjustments made.")
+                    # Arbitrarily move item2
+                    if dx < dy and dx < dz: # Resolve along X
+                        if (pos1[0] + dims1[0]/2) < (pos2[0] + dims2[0]/2): item2.position[0] = str(float(item2.position[0]) + dx)
+                        else: item2.position[0] = str(float(item2.position[0]) - dx)
+                    elif dy < dz: # Resolve along Y (pushing up)
+                        if (pos1[1] + dims1[1]/2) < (pos2[1] + dims2[1]/2): item2.position[1] = str(float(item2.position[1]) + dy)
+                        else: item2.position[1] = str(float(item2.position[1]) - dy)
+                    else: # Resolve along Z
+                        if (pos1[2] + dims1[2]/2) < (pos2[2] + dims2[2]/2): item2.position[2] = str(float(item2.position[2]) + dz)
+                        else: item2.position[2] = str(float(item2.position[2]) - dz)
+                        
+                    int_items_moved_this_pass += 1
+                    int_total_adjustments += 1
+        
+        print(f"Post-processing iteration {int_iteration + 1}: {int_items_moved_this_pass} corrective adjustments made.")
         if int_items_moved_this_pass == 0:
             print("Item stack has settled into a stable, collision-free configuration.")
             break
     else:
         print("Warning: Post-processing reached max iterations. The configuration may not be fully settled.")
 
-    # --- Stage 2: Final Boundary Enforcement ---
-    for obj_item in arr_items:
-        arr_pos = [float(p) for p in obj_item.position]
-        arr_dims = [float(d) for d in obj_item.get_dimension()]
-
-        for int_axis in range(3):
-            if arr_pos[int_axis] < 0:
-                arr_pos[int_axis] = 0
-            if arr_pos[int_axis] + arr_dims[int_axis] > arr_bin_dims[int_axis]:
-                arr_pos[int_axis] = arr_bin_dims[int_axis] - arr_dims[int_axis]
-
-        obj_item.position = [str(round(p, INT_PRECISION_DIGITS)) for p in arr_pos]
-
-    print("Packing post-processing complete.")
+    # --- Final Pass: Boundary Enforcement ---
+    for item in arr_items:
+        pos = [float(p) for p in item.position]
+        dims = [float(d) for d in item.get_dimension()]
+        for axis in range(3):
+            pos[axis] = max(0, min(pos[axis], arr_bin_dims[axis] - dims[axis]))
+        item.position = [str(round(p, INT_PRECISION_DIGITS)) for p in pos]
+    
+    print(f"Packing post-processing complete. Total loading adjustments counted: {int_total_adjustments}")
+    return int_total_adjustments

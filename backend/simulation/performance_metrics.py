@@ -46,8 +46,11 @@ def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo):
     # classic packing question: "How much of the available space did we use?" While it is a
     # traditional metric, it serves as a crucial baseline. It allows us to verify that any
     # improvements in unloading efficiency do not come at an unacceptable cost to packing density.
-    flt_totalPackedVolume = sum(item.get_volume() for item in arrPackedItems)
-    flt_volumeUtilization = float((flt_totalPackedVolume / fltBinVolume) * 100) if fltBinVolume > 0 else 0.0
+    
+    # FIX: Explicitly cast item volume to float to prevent Decimal/float conflicts.
+    flt_totalPackedVolume = sum(float(item.get_volume()) for item in arrPackedItems)
+    # FIX: Ensure fltBinVolume is treated as a float.
+    flt_volumeUtilization = float((flt_totalPackedVolume / float(fltBinVolume)) * 100) if float(fltBinVolume) > 0 else 0.0
 
     # To evaluate unloading, we must first establish the required unloading order.
     # We create a delivery sequence based on the `stop_id` for each package, simulating
@@ -100,11 +103,16 @@ def _fnSimulateUnloading(arrPackedItems, arrDeliverySequence, dictPackagesInfoMa
             if dictPackagesInfoMap.get(item.name, {}).get('stop_id') == str_targetStopId
         ]
 
-        # A driver must unload items from front-to-back. We sort the target items for this stop
-        # by their X-position to simulate this physical constraint.
+        # A driver must unload items from front-to-back AND top-to-bottom. This sort order
+        # correctly prioritizes items with the largest X coordinate (closest to door) first,
+        # then the largest Y coordinate (highest up). This creates a vertical, batch-like unload.
+        # FIX: Ensure all position components used for sorting are cast to float.
         arr_itemsForThisStopIds.sort(
-            key=lambda item_id: float(dict_itemsInBin[item_id].position[0]),
-            reverse=True # `reverse=True` because larger X means closer to the front.
+            key=lambda item_id: (
+                float(dict_itemsInBin[item_id].position[0]), # Primary sort: X-axis (front)
+                float(dict_itemsInBin[item_id].position[1])  # Secondary sort: Y-axis (top)
+            ),
+            reverse=True # `reverse=True` because larger X is front, larger Y is top.
         )
 
         # Now, attempt to retrieve each target item one by one.
@@ -124,12 +132,14 @@ def _fnSimulateUnloading(arrPackedItems, arrDeliverySequence, dictPackagesInfoMa
             # horizontal (Z) planes. A high number of blockers signifies a poorly designed
             # packing arrangement that creates significant extra work for the driver.
             arr_blockingItemsIds = []
+            # FIX: Ensure all dimensions and positions are cast to float before calculations.
             flt_tx, flt_ty, flt_tz = map(float, obj_targetItem.position)
             flt_tdx, flt_tdy, flt_tdz = map(float, obj_targetItem.get_dimension())
 
             for str_otherId, obj_otherItem in dict_itemsInBin.items():
                 if str_otherId == str_targetItemId: continue # An item cannot block itself.
 
+                # FIX: Ensure all dimensions and positions are cast to float before calculations.
                 flt_ox, flt_oy, flt_oz = map(float, obj_otherItem.position)
                 flt_odx, flt_ody, flt_odz = map(float, obj_otherItem.get_dimension())
 
@@ -143,6 +153,7 @@ def _fnSimulateUnloading(arrPackedItems, arrDeliverySequence, dictPackagesInfoMa
             # If any blockers were found, they must be "relocated" (removed from the bin first).
             if arr_blockingItemsIds:
                 # Relocate blockers from front-to-back to be efficient.
+                # FIX: Ensure position used for sorting is cast to float.
                 arr_blockingItemsIds.sort(
                     key=lambda item_id: float(dict_itemsInBin[item_id].position[0]),
                     reverse=True
@@ -190,8 +201,13 @@ def fnGenerateUnloadingSequence(arrPackedItems, arrAllPackagesInfo):
             item.name for item in dict_itemsInBin.values()
             if dict_packagesInfoMap.get(item.name, {}).get('stop_id') == str_targetStopId
         ]
+        # Match the updated sorting logic: Front-to-back (X), then Top-to-bottom (Y)
+        # FIX: Ensure all position components used for sorting are cast to float.
         arr_itemsForThisStopIds.sort(
-            key=lambda item_id: float(dict_itemsInBin[item_id].position[0]),
+            key=lambda item_id: (
+                float(dict_itemsInBin[item_id].position[0]),
+                float(dict_itemsInBin[item_id].position[1])
+            ),
             reverse=True
         )
 
@@ -203,11 +219,13 @@ def fnGenerateUnloadingSequence(arrPackedItems, arrAllPackagesInfo):
             arr_eventLog.append({'action': 'target', 'item_id': str_targetItemId})
             
             arr_blockingItemsIds = []
+            # FIX: Ensure all dimensions and positions are cast to float before calculations.
             flt_tx, flt_ty, flt_tz = map(float, obj_targetItem.position)
             flt_tdx, flt_tdy, flt_tdz = map(float, obj_targetItem.get_dimension())
 
             for str_otherId, obj_otherItem in dict_itemsInBin.items():
                 if str_otherId == str_targetItemId: continue
+                # FIX: Ensure all dimensions and positions are cast to float before calculations.
                 flt_ox, flt_oy, flt_oz = map(float, obj_otherItem.position)
                 flt_odx, flt_ody, flt_odz = map(float, obj_otherItem.get_dimension())
                 bln_isInFront = flt_ox > flt_tx
@@ -218,6 +236,7 @@ def fnGenerateUnloadingSequence(arrPackedItems, arrAllPackagesInfo):
                     arr_blockingItemsIds.append(str_otherId)
             
             if arr_blockingItemsIds:
+                # FIX: Ensure position used for sorting is cast to float.
                 arr_blockingItemsIds.sort(
                     key=lambda item_id: float(dict_itemsInBin[item_id].position[0]),
                     reverse=True

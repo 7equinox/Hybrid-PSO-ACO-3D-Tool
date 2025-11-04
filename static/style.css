@@ -204,8 +204,14 @@ h3 {
     color: #e08128;
 }
 
-#visualize-btn {
-    display: none; 
+/* --- MODIFICATION: Styling for the new visualize dropdown menu --- */
+.visualize-menu {
+    position: relative;
+    display: inline-block;
+}
+
+.visualize-btn {
+    display: inline-flex;
     align-items: center;
     gap: 8px;
     background-color: #e08128;
@@ -220,16 +226,45 @@ h3 {
     height: 40px;
     white-space: nowrap;
 }
-#visualize-btn i {
-    font-size: 16px;
-}
-#visualize-btn:hover {
+.visualize-btn:hover {
     background-color: #90541c;
 }
-#visualize-btn:disabled {
+.visualize-btn:disabled {
     background-color: #555;
     cursor: not-allowed;
     color: #999;
+}
+.visualize-btn:disabled i.fa-caret-down {
+    color: #999;
+}
+.visualize-btn i.fa-cube {
+    font-size: 16px;
+}
+
+.visualize-dropdown-content {
+    display: none;
+    position: absolute;
+    background-color: #3f3f3f;
+    min-width: 180px;
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.5);
+    z-index: 1;
+    border-radius: 5px;
+    overflow: hidden;
+    right: 0; /* Align dropdown to the right */
+}
+
+.visualize-dropdown-content a {
+    color: white;
+    padding: 12px 16px;
+    text-decoration: none;
+    display: block;
+    font-size: 14px;
+}
+.visualize-dropdown-content a:hover {
+    background-color: #555555;
+}
+.show-dropdown {
+    display: block;
 }
 
 

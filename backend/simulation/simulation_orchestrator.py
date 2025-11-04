@@ -243,7 +243,9 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
 
     obj_finalPacker.pack(bigger_first=True, distribute_items=True, number_of_decimals=0)
 
-    # Apply a post-processing step to add physical realism (gravity).
+    # --- MODIFICATION ---
+    # Apply a new post-processing step to add physical realism (gravity, collision).
+    # This function is the key to creating a dense, physically stable packing arrangement.
     _fnPostProcessPacking(obj_finalPacker.bins[0])
 
     arr_finalPackedItemsDetails = []

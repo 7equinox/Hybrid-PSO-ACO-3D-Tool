@@ -170,6 +170,10 @@ def _fnGetOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFA
                     flt_h = float(dict_dims.get('height_cm', 0))
                     flt_w = float(dict_dims.get('width_cm', 0))
                     flt_d = float(dict_dims.get('depth_cm', 0))
+                    
+                    # --- MODIFICATION ---
+                    # CRITICAL VALIDATION: Only include items with valid, non-zero dimensions.
+                    # This ensures the "Number of Products Loaded" count is accurate from the start.
                     if (flt_h > 0 and flt_w > 0 and flt_d > 0):
                         flt_volume = flt_h * flt_w * flt_d
                         arr_packagesForThisRoute.append({
@@ -194,6 +198,7 @@ def _fnGetOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFA
                 'width': math.floor(flt_dimension), 'height': math.floor(flt_dimension), 'depth': math.floor(flt_dimension),
                 'total_package_volume': flt_totalVolume,
                 'total_service_time': sum(p['service_time'] for p in arr_packagesForThisRoute),
+                # The number of packages now correctly reflects only the valid, filtered items.
                 'num_packages': len(arr_packagesForThisRoute),
             }
 

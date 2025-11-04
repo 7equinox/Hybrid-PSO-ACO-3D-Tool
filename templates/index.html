@@ -120,9 +120,19 @@ ESTONILO, JULIUS EVAN C.
                         <p class="label">Algorithm</p>
                         <h2 id="result-algorithm-name">*Algorithm Name*</h2>
                     </div>
-                    <button id="visualize-btn">
-                        <i class="fa-solid fa-cube"></i> Visualize Packing
-                    </button>
+                    <!-- --- MODIFICATION: Replaced single button with a dropdown menu --- -->
+                    <div id="visualize-menu" class="visualize-menu" style="display: none;">
+                        <button id="visualize-menu-btn" class="visualize-btn">
+                            <i class="fa-solid fa-cube"></i>
+                            <span>Visualize Result</span>
+                            <i class="fa-solid fa-caret-down"></i>
+                        </button>
+                        <div id="visualize-dropdown-content" class="visualize-dropdown-content">
+                            <a href="#" id="viz-static-btn">Visualize Final Packing</a>
+                            <a href="#" id="viz-load-anim-btn">Animate Loading</a>
+                            <a href="#" id="viz-unload-anim-btn">Animate Unloading</a>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Summary Banners for Simulation Results -->
@@ -239,7 +249,8 @@ ESTONILO, JULIUS EVAN C.
             <div class="toggle-switch-container">
                 <label for="dynamic-constraint-toggle" class="label">Enable Dynamic Constraint</label>
                 <label class="switch">
-                    <input type="checkbox" id="dynamic-constraint-toggle" checked>
+                    <!-- --- MODIFICATION: 'checked' attribute removed to default to off --- -->
+                    <input type="checkbox" id="dynamic-constraint-toggle">
                     <span class="slider round"></span>
                 </label>
             </div>
@@ -285,7 +296,7 @@ ESTONILO, JULIUS EVAN C.
                 <li>
                     <strong>Analyze the Results:</strong>
                     <p>
-                        Once complete, the right-hand panel will display the outcome, including key metrics. If the simulation produced a valid result, a <strong><span class="highlight-text">Visualize Packing</span></strong> button will appear, which opens an interactive 3D view of the loaded vehicle.
+                        Once complete, the right-hand panel will display the outcome, including key metrics. If the simulation produced a valid result, a <strong><span class="highlight-text">Visualize Result</span></strong> dropdown menu will appear, allowing you to view an interactive 3D model or watch loading and unloading animations.
                     </p>
                 </li>
             </ol>

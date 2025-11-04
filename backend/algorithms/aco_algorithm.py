@@ -119,10 +119,12 @@ def fnRunAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCance
             # are reinforced. Ants "deposit" more pheromones on these successful trails, making them
             # more attractive and more likely to be chosen by ants in future generations.
             for arr_solution, tpl_fitness in arr_allAntSolutions:
-                # The amount of pheromone deposited is inversely proportional to the solution's
-                # primary fitness value (volume utilization), since lower is now better.
-                # FIX: Explicitly cast tpl_fitness[0] to float to prevent the TypeError.
-                flt_pheromoneDeposit = 1.0 / (1.0 + float(tpl_fitness[0]))
+                # MODIFICATION (Req #7): The amount of pheromone deposited is now inversely proportional
+                # to a COMBINED fitness score, making the algorithm sensitive to both objectives.
+                # A lower combined score is better. We add a small constant to avoid division by zero.
+                flt_combinedFitness = float(tpl_fitness[0]) + float(tpl_fitness[1])
+                flt_pheromoneDeposit = 1.0 / (1.0 + flt_combinedFitness)
+
                 if flt_pheromoneDeposit > 0:
                     # For each step in the successful path, reinforce the connection.
                     for i in range(int_numItems - 1):

@@ -164,3 +164,71 @@ def _fnSimulateUnloading(arrPackedItems, arrDeliverySequence, dictPackagesInfoMa
         return float('inf')
 
     return int_relocations
+
+
+def fnGenerateUnloadingSequence(arrPackedItems, arrAllPackagesInfo):
+    """
+    Performs the same unloading simulation as _fnSimulateUnloading, but instead
+    of returning a simple count, it generates a detailed, step-by-step event log
+    for creating an animation on the frontend.
+    
+    Returns:
+        list: A list of event dictionaries (e.g., {'action': 'relocate', 'item_id': 'xyz'}).
+    """
+    if not arrPackedItems:
+        return []
+
+    dict_itemsInBin = {item.name: item for item in arrPackedItems}
+    dict_packagesInfoMap = {p['id']: p for p in arrAllPackagesInfo}
+    set_packedStops = {dict_packagesInfoMap.get(item.name, {}).get('stop_id') for item in arrPackedItems}
+    arr_deliverySequence = sorted(list(filter(None, set_packedStops)))
+    
+    arr_eventLog = []
+
+    for str_targetStopId in arr_deliverySequence:
+        arr_itemsForThisStopIds = [
+            item.name for item in dict_itemsInBin.values()
+            if dict_packagesInfoMap.get(item.name, {}).get('stop_id') == str_targetStopId
+        ]
+        arr_itemsForThisStopIds.sort(
+            key=lambda item_id: float(dict_itemsInBin[item_id].position[0]),
+            reverse=True
+        )
+
+        for str_targetItemId in arr_itemsForThisStopIds:
+            if str_targetItemId not in dict_itemsInBin:
+                continue
+
+            obj_targetItem = dict_itemsInBin[str_targetItemId]
+            arr_eventLog.append({'action': 'target', 'item_id': str_targetItemId})
+            
+            arr_blockingItemsIds = []
+            flt_tx, flt_ty, flt_tz = map(float, obj_targetItem.position)
+            flt_tdx, flt_tdy, flt_tdz = map(float, obj_targetItem.get_dimension())
+
+            for str_otherId, obj_otherItem in dict_itemsInBin.items():
+                if str_otherId == str_targetItemId: continue
+                flt_ox, flt_oy, flt_oz = map(float, obj_otherItem.position)
+                flt_odx, flt_ody, flt_odz = map(float, obj_otherItem.get_dimension())
+                bln_isInFront = flt_ox > flt_tx
+                bln_yOverlap = (flt_ty < flt_oy + flt_ody) and (flt_oy < flt_ty + flt_tdy)
+                bln_zOverlap = (flt_tz < flt_oz + flt_odz) and (flt_oz < flt_tz + flt_odz)
+
+                if bln_isInFront and bln_yOverlap and bln_zOverlap:
+                    arr_blockingItemsIds.append(str_otherId)
+            
+            if arr_blockingItemsIds:
+                arr_blockingItemsIds.sort(
+                    key=lambda item_id: float(dict_itemsInBin[item_id].position[0]),
+                    reverse=True
+                )
+                for str_blockerId in arr_blockingItemsIds:
+                    if str_blockerId in dict_itemsInBin:
+                        arr_eventLog.append({'action': 'relocate', 'item_id': str_blockerId})
+                        del dict_itemsInBin[str_blockerId]
+
+            if str_targetItemId in dict_itemsInBin:
+                arr_eventLog.append({'action': 'deliver', 'item_id': str_targetItemId})
+                del dict_itemsInBin[str_targetItemId]
+
+    return arr_eventLog

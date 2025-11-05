@@ -63,191 +63,137 @@ def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo):
     # This metric is derived from a detailed, step-by-step simulation of the physical
     # unloading process. This simulation is the core mechanism that allows us to quantitatively
     # answer the research questions about operational efficiency.
-    int_relocationCount = _fnSimulateUnloading(arrPackedItems, arr_deliverySequence, dict_packagesInfoMap)
-
+    # The simulation now generates an event log and a relocation count simultaneously.
+    dict_unloadingSimulationResult = fnGenerateUnloadingSequence(arrPackedItems, arr_deliverySequence, dict_packagesInfoMap)
+    int_relocationCount = dict_unloadingSimulationResult['relocation_count']
+    arr_unloadingSequence = dict_unloadingSimulationResult['event_log']
 
     # Consolidate all metrics into a single, structured results object.
     return {
         'volume_utilization': round(flt_volumeUtilization, 2),
         'relocation_count': int_relocationCount,
+        'unloading_sequence': arr_unloadingSequence # Pass the detailed log for visualization.
     }
 
 
-def _fnSimulateUnloading(arrPackedItems, arrDeliverySequence, dictPackagesInfoMap):
+def fnGenerateUnloadingSequence(arrPackedItems, arrDeliverySequence, dictPackagesInfoMap):
     """
-    Simulates the physical, step-by-step process of a delivery driver unloading items
-    from the vehicle. This function is the primary tool for evaluating the operational
-    efficiency of a packing arrangement. It quantifies the extra work (relocations) required.
-    If an unloading deadlock occurs (items are trapped), it returns an infinite penalty.
+    Simulates the unloading process step-by-step to generate a detailed event log
+    for frontend animation and to count relocations accurately. This revised
+    function implements a more realistic "vertical batch" unloading from the front
+    and simulates gravity to settle items after removals.
 
-    Physical Assumption: The delivery vehicle is unloaded from a single opening at the front
-    (defined as the position with the largest X-coordinate).
+    Physical Assumption: The vehicle is unloaded from the front (largest X-coordinate).
+    Unloading proceeds from Top-to-Bottom for items in the current front-most "slice".
 
     Returns:
-        int: The total number of relocations. Returns float('inf') if unloading is not feasible.
-    """
-    # An empty vehicle is perfectly feasible with zero work.
-    if not arrPackedItems:
-        return 0
-
-    # Create a mutable copy of the items to simulate their physical removal from the vehicle.
-    dict_itemsInBin = {item.name: item for item in arrPackedItems}
-
-    int_relocations = 0      # Counts only the unnecessary moves.
-
-    # Process each stop in the pre-defined delivery sequence, mimicking a driver's route.
-    for str_targetStopId in arrDeliverySequence:
-        # First, identify all items currently inside the vehicle that are destined for this stop.
-        arr_itemsForThisStopIds = [
-            item.name for item in dict_itemsInBin.values()
-            if dictPackagesInfoMap.get(item.name, {}).get('stop_id') == str_targetStopId
-        ]
-
-        # A driver must unload items from front-to-back AND top-to-bottom. This sort order
-        # correctly prioritizes items with the largest X coordinate (closest to door) first,
-        # then the largest Y coordinate (highest up). This creates a vertical, batch-like unload.
-        # FIX: Ensure all position components used for sorting are cast to float.
-        arr_itemsForThisStopIds.sort(
-            key=lambda item_id: (
-                float(dict_itemsInBin[item_id].position[0]), # Primary sort: X-axis (front)
-                float(dict_itemsInBin[item_id].position[1])  # Secondary sort: Y-axis (top)
-            ),
-            reverse=True # `reverse=True` because larger X is front, larger Y is top.
-        )
-
-        # Now, attempt to retrieve each target item one by one.
-        for str_targetItemId in arr_itemsForThisStopIds:
-            # Check if the item is still in the bin. It might have already been
-            # moved out as a blocker for a previous item.
-            if str_targetItemId not in dict_itemsInBin:
-                continue
-
-            obj_targetItem = dict_itemsInBin[str_targetItemId]
-
-            # --- Blocker Identification ---
-            # This is the critical logic that directly addresses the Statement of the Problem.
-            # We must identify which OTHER items are physically blocking access to our target item.
-            # An item is considered a "blocker" if it is positioned IN FRONT of the target
-            # (has a larger x-coordinate) AND overlaps with it in the vertical (Y) and
-            # horizontal (Z) planes. A high number of blockers signifies a poorly designed
-            # packing arrangement that creates significant extra work for the driver.
-            arr_blockingItemsIds = []
-            # FIX: Ensure all dimensions and positions are cast to float before calculations.
-            flt_tx, flt_ty, flt_tz = map(float, obj_targetItem.position)
-            flt_tdx, flt_tdy, flt_tdz = map(float, obj_targetItem.get_dimension())
-
-            for str_otherId, obj_otherItem in dict_itemsInBin.items():
-                if str_otherId == str_targetItemId: continue # An item cannot block itself.
-
-                # FIX: Ensure all dimensions and positions are cast to float before calculations.
-                flt_ox, flt_oy, flt_oz = map(float, obj_otherItem.position)
-                flt_odx, flt_ody, flt_odz = map(float, obj_otherItem.get_dimension())
-
-                bln_isInFront = flt_ox > flt_tx # Is it closer to the door?
-                bln_yOverlap = (flt_ty < flt_oy + flt_ody) and (flt_oy < flt_ty + flt_tdy) # Does it overlap vertically?
-                bln_zOverlap = (flt_tz < flt_oz + flt_odz) and (flt_oz < flt_tz + flt_odz) # Does it overlap sideways?
-
-                if bln_isInFront and bln_yOverlap and bln_zOverlap:
-                    arr_blockingItemsIds.append(str_otherId)
-
-            # If any blockers were found, they must be "relocated" (removed from the bin first).
-            if arr_blockingItemsIds:
-                # Relocate blockers from front-to-back to be efficient.
-                # FIX: Ensure position used for sorting is cast to float.
-                arr_blockingItemsIds.sort(
-                    key=lambda item_id: float(dict_itemsInBin[item_id].position[0]),
-                    reverse=True
-                )
-                for str_blockerId in arr_blockingItemsIds:
-                    if str_blockerId in dict_itemsInBin:
-                        int_relocations += 1      # This is an extra, wasted move.
-                        del dict_itemsInBin[str_blockerId] # Simulate removing the blocker.
-
-            # After all blockers are cleared, the target item can be retrieved.
-            if str_targetItemId in dict_itemsInBin:
-                del dict_itemsInBin[str_targetItemId] # Simulate removing the target item.
-
-    # --- Final Feasibility Check ---
-    # If any items remain, it signifies a "deadlock" scenario where some items
-    # were permanently trapped. This is a catastrophic operational failure and is
-    # heavily penalized by returning an infinite relocation count.
-    if dict_itemsInBin: # If the dictionary is NOT empty, it's infeasible.
-        return float('inf')
-
-    return int_relocations
-
-
-def fnGenerateUnloadingSequence(arrPackedItems, arrAllPackagesInfo):
-    """
-    Performs the same unloading simulation as _fnSimulateUnloading, but instead
-    of returning a simple count, it generates a detailed, step-by-step event log
-    for creating an animation on the frontend.
-    
-    Returns:
-        list: A list of event dictionaries (e.g., {'action': 'relocate', 'item_id': 'xyz'}).
+        dict: A dictionary containing the 'event_log' (a list of actions) and the
+              'relocation_count'. Returns an infinite count on failure.
     """
     if not arrPackedItems:
-        return []
+        return {'event_log': [], 'relocation_count': 0}
 
-    dict_itemsInBin = {item.name: item for item in arrPackedItems}
-    dict_packagesInfoMap = {p['id']: p for p in arrAllPackagesInfo}
-    set_packedStops = {dict_packagesInfoMap.get(item.name, {}).get('stop_id') for item in arrPackedItems}
-    arr_deliverySequence = sorted(list(filter(None, set_packedStops)))
+    # Use a dictionary of dictionaries for mutable, detailed item data.
+    dict_itemsInBin = {
+        item.name: {
+            'id': item.name,
+            'pos': [float(p) for p in item.position],
+            'dims': [float(d) for d in item.get_dimension()],
+            'stop_id': dictPackagesInfoMap.get(item.name, {}).get('stop_id'),
+            'item_obj': item 
+        } for item in arrPackedItems
+    }
     
     arr_eventLog = []
+    int_relocations = 0
 
-    for str_targetStopId in arr_deliverySequence:
-        arr_itemsForThisStopIds = [
-            item.name for item in dict_itemsInBin.values()
-            if dict_packagesInfoMap.get(item.name, {}).get('stop_id') == str_targetStopId
-        ]
-        # Match the updated sorting logic: Front-to-back (X), then Top-to-bottom (Y)
-        # FIX: Ensure all position components used for sorting are cast to float.
-        arr_itemsForThisStopIds.sort(
-            key=lambda item_id: (
-                float(dict_itemsInBin[item_id].position[0]),
-                float(dict_itemsInBin[item_id].position[1])
-            ),
-            reverse=True
-        )
+    for str_targetStopId in arrDeliverySequence:
+        while True: # Loop until all items for this stop are delivered or found unreachable.
+            arr_itemsForThisStopIds = [
+                item['id'] for item in dict_itemsInBin.values() if item['stop_id'] == str_targetStopId
+            ]
+            if not arr_itemsForThisStopIds: break # No more items for this stop, move to the next.
 
-        for str_targetItemId in arr_itemsForThisStopIds:
-            if str_targetItemId not in dict_itemsInBin:
-                continue
-
+            # Identify the single most accessible item for the current stop.
+            # "Most accessible" means: largest X (closest to door), then largest Y (highest up).
+            str_targetItemId = max(
+                arr_itemsForThisStopIds, 
+                key=lambda item_id: (dict_itemsInBin[item_id]['pos'][0], dict_itemsInBin[item_id]['pos'][1])
+            )
+            
             obj_targetItem = dict_itemsInBin[str_targetItemId]
             arr_eventLog.append({'action': 'target', 'item_id': str_targetItemId})
-            
+
+            # --- Blocker Identification ---
             arr_blockingItemsIds = []
-            # FIX: Ensure all dimensions and positions are cast to float before calculations.
-            flt_tx, flt_ty, flt_tz = map(float, obj_targetItem.position)
-            flt_tdx, flt_tdy, flt_tdz = map(float, obj_targetItem.get_dimension())
+            flt_tx, flt_ty, flt_tz = obj_targetItem['pos']
+            flt_tdx, flt_tdy, flt_tdz = obj_targetItem['dims']
 
             for str_otherId, obj_otherItem in dict_itemsInBin.items():
                 if str_otherId == str_targetItemId: continue
-                # FIX: Ensure all dimensions and positions are cast to float before calculations.
-                flt_ox, flt_oy, flt_oz = map(float, obj_otherItem.position)
-                flt_odx, flt_ody, flt_odz = map(float, obj_otherItem.get_dimension())
+
+                flt_ox, flt_oy, flt_oz = obj_otherItem['pos']
+                flt_odx, flt_ody, flt_odz = obj_otherItem['dims']
+
                 bln_isInFront = flt_ox > flt_tx
                 bln_yOverlap = (flt_ty < flt_oy + flt_ody) and (flt_oy < flt_ty + flt_tdy)
                 bln_zOverlap = (flt_tz < flt_oz + flt_odz) and (flt_oz < flt_tz + flt_odz)
 
                 if bln_isInFront and bln_yOverlap and bln_zOverlap:
                     arr_blockingItemsIds.append(str_otherId)
-            
+
+            # If blockers are found, they must be relocated.
             if arr_blockingItemsIds:
-                # FIX: Ensure position used for sorting is cast to float.
                 arr_blockingItemsIds.sort(
-                    key=lambda item_id: float(dict_itemsInBin[item_id].position[0]),
-                    reverse=True
+                    key=lambda item_id: dict_itemsInBin[item_id]['pos'][0], reverse=True
                 )
                 for str_blockerId in arr_blockingItemsIds:
                     if str_blockerId in dict_itemsInBin:
+                        int_relocations += 1
                         arr_eventLog.append({'action': 'relocate', 'item_id': str_blockerId})
                         del dict_itemsInBin[str_blockerId]
-
+            
+            # After clearing blockers, deliver the target item.
             if str_targetItemId in dict_itemsInBin:
                 arr_eventLog.append({'action': 'deliver', 'item_id': str_targetItemId})
                 del dict_itemsInBin[str_targetItemId]
+            
+            # --- MODIFICATION: Apply Gravity Simulation After Every Removal ---
+            # After removing an item (or items), check for any items that are now unsupported and settle them.
+            bln_items_settled = True
+            while bln_items_settled: # Loop until no more items can settle in a pass.
+                bln_items_settled = False
+                arr_sorted_items = sorted(dict_itemsInBin.values(), key=lambda i: i['pos'][1])
 
-    return arr_eventLog
+                for item_to_check in arr_sorted_items:
+                    flt_ix, flt_iy, flt_iz = item_to_check['pos']
+                    flt_iw, flt_ih, flt_id = item_to_check['dims']
+                    
+                    flt_highest_support_y = 0.0
+                    for other_item in dict_itemsInBin.values():
+                        if other_item['id'] == item_to_check['id']: continue
+                        
+                        flt_ox, flt_oy, flt_oz = other_item['pos']
+                        flt_ow, flt_oh, flt_od = other_item['dims']
+
+                        # Check if 'other_item' is below 'item_to_check' and overlaps in X-Z plane
+                        if (flt_oy + flt_oh) <= flt_iy + 1e-4:
+                            overlap_x = (flt_ix < flt_ox + flt_ow) and (flt_ox < flt_ix + flt_iw)
+                            overlap_z = (flt_iz < flt_oz + flt_od) and (flt_oz < flt_iz + flt_id)
+                            if overlap_x and overlap_z:
+                                flt_highest_support_y = max(flt_highest_support_y, flt_oy + flt_oh)
+                    
+                    if flt_iy > flt_highest_support_y + 1e-4: # If item is floating
+                        item_to_check['pos'][1] = flt_highest_support_y
+                        bln_items_settled = True
+                        arr_eventLog.append({
+                            'action': 'settle',
+                            'item_id': item_to_check['id'],
+                            'new_y_pos': flt_highest_support_y
+                        })
+    
+    # Final feasibility check
+    if dict_itemsInBin:
+        return {'event_log': arr_eventLog, 'relocation_count': float('inf')}
+
+    return {'event_log': arr_eventLog, 'relocation_count': int_relocations}

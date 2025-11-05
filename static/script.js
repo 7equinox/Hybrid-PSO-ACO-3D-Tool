@@ -711,486 +711,355 @@ document.addEventListener("DOMContentLoaded", () =>
     }
 
 
-    /**
-     * This function is responsible for creating and opening the interactive 3D visualization.
-     * It dynamically generates a complete HTML file as a string, injects the necessary
-     * simulation data into it, and then opens this generated content in a new browser window.
-     * This has been refactored to handle static, loading, and unloading modes.
-     */
-    function _openVisualizationWindow(mode = 'static')
+/**
+ * This function is responsible for creating and opening the interactive 3D visualization.
+ * It dynamically generates a complete HTML file as a string, injects the necessary
+ * simulation data into it, and then opens this generated content in a new browser window.
+ * This has been refactored to handle static, loading, and unloading modes.
+ */
+function _openVisualizationWindow(mode = 'static')
+{
+    if (!g_objLastResults) 
     {
-        if (!g_objLastResults) 
-        {
-            alert("No simulation data available to visualize.");
-            return;
-        }
+        alert("No simulation data available to visualize.");
+        return;
+    }
 
-        const { vehicle_info, packed_items, metrics } = g_objLastResults;
-        
-        // --- ADDITION: Logic to create a unique unloading sequence for the animation ---
-        const allPackageInfo = g_arrAllLoadedPackages.reduce((map, pkg) => {
-            map[pkg.id] = pkg;
-            return map;
-        }, {});
-        const packedStops = new Set(packed_items.map(item => allPackageInfo[item.id]?.stop_id));
-        const deliverySequence = Array.from(packedStops).filter(Boolean).sort();
-        
-        const strHtmlContent = `
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <meta charset="UTF-8">
-                <title>3D Packing Visualization</title>
-                <style>
-                    body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #282c34; color: white; }
-                    canvas { display: block; }
-                    .info-panel {
-                        position: absolute; padding: 10px; background: rgba(0, 0, 0, 0.7);
-                        border-radius: 5px; font-size: 14px; line-height: 1.5;
-                        border: 1px solid #555;
-                    }
-                    #item-info-panel { left: 10px; top: 10px; display: none; }
-                    #item-info-panel strong { color: #e08128; }
-                    #controls-panel { right: 10px; top: 10px; text-align: right; }
-                    #animation-panel { 
-                        display: ${mode === 'static' ? 'none' : 'block'};
-                        left: 10px; bottom: 10px; width: calc(100% - 20px);
-                    }
-                    .anim-controls { display: flex; align-items: center; gap: 15px; margin-top: 5px; }
-                    .anim-controls button, .controls-btn {
-                        padding: 8px 12px; background: #333; color: white; border: 1px solid #555;
-                        border-radius: 5px; cursor: pointer; 
-                    }
-                    .anim-controls button:hover, .controls-btn:hover { background: #555; }
-                    .anim-controls button:disabled { background: #222; color: #777; cursor: not-allowed; }
-                    #progress-bar-container { flex-grow: 1; height: 10px; background: #555; border-radius: 5px; overflow: hidden; }
-                    #progress-bar { width: 0%; height: 100%; background: #e08128; transition: width 0.1s linear; }
-                </style>
-            </head>
-            <body>
-                <div id="item-info-panel" class="info-panel"></div>
-                <div id="controls-panel" class="info-panel">
-                    <b>Controls:</b> Left-Click to Rotate, Right-Click to Pan, Scroll to Zoom.
-                    <br/><button id="reset-view-btn" class="controls-btn">Reset View</button>
+    const { vehicle_info, packed_items, metrics, loading_sequence, unloading_sequence } = g_objLastResults;
+    
+    const strHtmlContent = `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <title>3D Packing Visualization</title>
+            <style>
+                body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #282c34; color: white; }
+                canvas { display: block; }
+                .info-panel {
+                    position: absolute; padding: 10px; background: rgba(0, 0, 0, 0.7);
+                    border-radius: 5px; font-size: 14px; line-height: 1.5;
+                    border: 1px solid #555;
+                }
+                #item-info-panel { left: 10px; top: 10px; display: none; }
+                #item-info-panel strong { color: #e08128; }
+                #controls-panel { right: 10px; top: 10px; text-align: right; }
+                #animation-panel { 
+                    display: ${mode === 'static' ? 'none' : 'block'};
+                    left: 10px; bottom: 10px; width: calc(100% - 20px);
+                }
+                .anim-controls { display: flex; align-items: center; gap: 15px; margin-top: 5px; }
+                .anim-controls button, .controls-btn {
+                    padding: 8px 12px; background: #333; color: white; border: 1px solid #555;
+                    border-radius: 5px; cursor: pointer; 
+                }
+                .anim-controls button:hover, .controls-btn:hover { background: #555; }
+                .anim-controls button:disabled { background: #222; color: #777; cursor: not-allowed; }
+                #progress-bar-container { flex-grow: 1; height: 10px; background: #555; border-radius: 5px; overflow: hidden; }
+                #progress-bar { width: 0%; height: 100%; background: #e08128; transition: width 0.1s linear; }
+            </style>
+        </head>
+        <body>
+            <div id="item-info-panel" class="info-panel"></div>
+            <div id="controls-panel" class="info-panel">
+                <b>Controls:</b> Left-Click to Rotate, Right-Click to Pan, Scroll to Zoom.
+                <br/><button id="reset-view-btn" class="controls-btn">Reset View</button>
+            </div>
+            <div id="animation-panel" class="info-panel">
+                <div id="animation-status">Status: Paused</div>
+                 <div class="anim-controls">
+                    <button id="play-pause-btn">Play</button>
+                    <div id="progress-bar-container"><div id="progress-bar"></div></div>
+                    <label for="speed-slider">Speed:</label>
+                    <input type="range" id="speed-slider" min="1" max="10" value="5" step="1">
                 </div>
-                <div id="animation-panel" class="info-panel">
-                    <div id="animation-status">Status: Paused</div>
-                     <div class="anim-controls">
-                        <button id="play-pause-btn">Play</button>
-                        <div id="progress-bar-container"><div id="progress-bar"></div></div>
-                        <label for="speed-slider">Speed:</label>
-                        <input type="range" id="speed-slider" min="1" max="10" value="5" step="1">
-                    </div>
-                </div>
+            </div>
 
-                <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>
-                <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"><\/script>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>
+            <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"><\/script>
+            
+            <script>
+                const mode = '${mode}';
+                const vehicle_info = ${JSON.stringify(vehicle_info)};
+                let packed_items_data = ${JSON.stringify(packed_items)};
+                const loading_sequence = ${JSON.stringify(loading_sequence || [])};
+                const unloading_sequence = ${JSON.stringify(unloading_sequence || [])};
+
+                const objScene = new THREE.Scene();
+                objScene.background = new THREE.Color(0x282c34);
+                const objCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 20000);
+                const objRenderer = new THREE.WebGLRenderer({ antialias: true });
+                objRenderer.setSize(window.innerWidth, window.innerHeight);
+                document.body.appendChild(objRenderer.domElement);
+
+                const objControls = new THREE.OrbitControls(objCamera, objRenderer.domElement);
+                const objAmbientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                objScene.add(objAmbientLight);
+                const objDirectionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                objDirectionalLight.position.set(200, 500, 300);
+                objScene.add(objDirectionalLight);
+
+                const fltVehicleW = vehicle_info.width;
+                const fltVehicleH = vehicle_info.height;
+                const fltVehicleD = vehicle_info.depth;
+                const objContainerGeom = new THREE.BoxGeometry(fltVehicleW, fltVehicleH, fltVehicleD);
+                const objContainerEdges = new THREE.EdgesGeometry(objContainerGeom);
+                const objContainerLines = new THREE.LineSegments(objContainerEdges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 }));
+                const objContainerCenter = new THREE.Vector3(fltVehicleW / 2, fltVehicleH / 2, fltVehicleD / 2);
+                objContainerLines.position.copy(objContainerCenter);
+                objScene.add(objContainerLines);
                 
-                <script>
-                    const mode = '${mode}';
-                    const vehicle_info = ${JSON.stringify(vehicle_info)};
-                    let packed_items = ${JSON.stringify(packed_items)};
-                    const deliverySequence = ${JSON.stringify(deliverySequence)};
-                    const allPackageInfo = ${JSON.stringify(allPackageInfo)};
-                    let active_tweens = [];
-
-                    const objScene = new THREE.Scene();
-                    objScene.background = new THREE.Color(0x282c34);
-                    const objCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 20000);
-                    const objRenderer = new THREE.WebGLRenderer({ antialias: true });
-                    objRenderer.setSize(window.innerWidth, window.innerHeight);
-                    document.body.appendChild(objRenderer.domElement);
-
-                    const objControls = new THREE.OrbitControls(objCamera, objRenderer.domElement);
-                    const objAmbientLight = new THREE.AmbientLight(0xffffff, 0.6);
-                    objScene.add(objAmbientLight);
-                    const objDirectionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-                    objDirectionalLight.position.set(200, 500, 300);
-                    objScene.add(objDirectionalLight);
-
-                    const fltVehicleW = vehicle_info.width;
-                    const fltVehicleH = vehicle_info.height;
-                    const fltVehicleD = vehicle_info.depth;
-                    const objContainerGeom = new THREE.BoxGeometry(fltVehicleW, fltVehicleH, fltVehicleD);
-                    const objContainerEdges = new THREE.EdgesGeometry(objContainerGeom);
-                    const objContainerLines = new THREE.LineSegments(objContainerEdges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 }));
-                    const objContainerCenter = new THREE.Vector3(fltVehicleW / 2, fltVehicleH / 2, fltVehicleD / 2);
-                    objContainerLines.position.copy(objContainerCenter);
-                    objScene.add(objContainerLines);
-                    
-                    const objColorCache = {};
-                    function getDeterministicColor(strId) {
-                        if (!objColorCache[strId]) {
-                            let intHash = 0;
-                            for (let i = 0; i < strId.length; i++) {
-                                intHash = strId.charCodeAt(i) + ((intHash << 5) - intHash);
-                                intHash = intHash & intHash;
-                            }
-                            const intHue = Math.abs(intHash % 360);
-                            objColorCache[strId] = new THREE.Color(\`hsl(\${intHue}, 80%, 60%)\`);
+                const objColorCache = {};
+                function getDeterministicColor(strId) {
+                    if (!objColorCache[strId]) {
+                        let intHash = 0;
+                        for (let i = 0; i < strId.length; i++) {
+                            intHash = strId.charCodeAt(i) + ((intHash << 5) - intHash);
+                            intHash = intHash & intHash;
                         }
-                        return objColorCache[strId];
+                        const intHue = Math.abs(intHash % 360);
+                        objColorCache[strId] = new THREE.Color(\`hsl(\${intHue}, 80%, 60%)\`);
                     }
+                    return objColorCache[strId];
+                }
 
-                    const packageMeshes = {}; // Use a map for easy lookup by ID
+                const packageMeshes = {}; // Map of all item meshes, loaded or not.
 
-                    function createPackageMesh(objItem) {
-                        if (objItem.width <= 0 || objItem.height <= 0 || objItem.depth <= 0) return null;
-                        const FLT_VISUAL_SCALE = 0.999;
-                        const objItemGeom = new THREE.BoxGeometry(objItem.width * FLT_VISUAL_SCALE, objItem.height * FLT_VISUAL_SCALE, objItem.depth * FLT_VISUAL_SCALE);
-                        const objItemMaterial = new THREE.MeshLambertMaterial({ color: getDeterministicColor(objItem.id), transparent: true });
-                        const objItemMesh = new THREE.Mesh(objItemGeom, objItemMaterial);
-                        // The backend position is the corner, Three.js uses the center.
-                        const centered_pos = {
-                            x: objItem.position_x + objItem.width / 2,
-                            y: objItem.position_y + objItem.height / 2,
-                            z: objItem.position_z + objItem.depth / 2,
-                        };
-                        objItemMesh.position.set(centered_pos.x, centered_pos.y, centered_pos.z);
-                        objItemMesh.userData = { ...objItem, originalMaterial: objItemMaterial, centered_pos: centered_pos };
-                        return objItemMesh;
-                    }
-
-                    const fltZoomFactor = 1.05;
-                    objCamera.position.set(
-                        objContainerCenter.x,
-                        objContainerCenter.y + fltVehicleH,
-                        objContainerCenter.z + fltVehicleD * 1.5
-                    );
-                    objControls.target.copy(objContainerCenter);
-                    objControls.saveState();
+                function createPackageMesh(objItem) {
+                    if (objItem.width <= 0 || objItem.height <= 0 || objItem.depth <= 0) return null;
+                    const FLT_VISUAL_SCALE = 0.999;
+                    const objItemGeom = new THREE.BoxGeometry(objItem.width * FLT_VISUAL_SCALE, objItem.height * FLT_VISUAL_SCALE, objItem.depth * FLT_VISUAL_SCALE);
+                    const objItemMaterial = new THREE.MeshLambertMaterial({ color: getDeterministicColor(objItem.id), transparent: true });
+                    const objItemMesh = new THREE.Mesh(objItemGeom, objItemMaterial);
                     
-                    function createTextSprite(strMessage, objPosition) {
-                         const objCanvas = document.createElement('canvas');
-                        const objContext = objCanvas.getContext('2d');
-                        objContext.font = \`Bold 16px Arial\`;
-                        const fltTextWidth = objContext.measureText(strMessage).width;
-                        objCanvas.width = fltTextWidth + 20;
-                        objCanvas.height = 40;
-                        objContext.font = \`Bold 16px Arial\`;
-                        objContext.fillStyle = 'rgba(255, 255, 255, 0.8)';
-                        objContext.textAlign = 'center';
-                        objContext.textBaseline = 'middle';
-                        objContext.fillText(strMessage, objCanvas.width / 2, objCanvas.height / 2);
-                        const objTexture = new THREE.CanvasTexture(objCanvas);
-                        const objSpriteMaterial = new THREE.SpriteMaterial({ map: objTexture });
-                        const objSprite = new THREE.Sprite(objSpriteMaterial);
-                        objSprite.scale.set(objCanvas.width / 2, objCanvas.height / 2, 1.0);
-                        objSprite.position.copy(objPosition);
-                        objScene.add(objSprite);
+                    const centered_pos = {
+                        x: objItem.position_x + objItem.width / 2,
+                        y: objItem.position_y + objItem.height / 2,
+                        z: objItem.position_z + objItem.depth / 2,
+                    };
+                    objItemMesh.position.set(centered_pos.x, centered_pos.y, centered_pos.z);
+                    objItemMesh.userData = { ...objItem, originalMaterial: objItemMaterial, final_position: centered_pos };
+                    return objItemMesh;
+                }
+
+                // Pre-create all meshes so they exist for the simulation.
+                packed_items_data.forEach(item => {
+                    const mesh = createPackageMesh(item);
+                    if (mesh) packageMeshes[item.id] = mesh;
+                });
+
+                objCamera.position.set(objContainerCenter.x, objContainerCenter.y + fltVehicleH, objContainerCenter.z + fltVehicleD * 1.5);
+                objControls.target.copy(objContainerCenter);
+                objControls.saveState();
+                
+                function createTextSprite(strMessage, objPosition) {
+                    const objCanvas = document.createElement('canvas');
+                    const objContext = objCanvas.getContext('2d');
+                    objContext.font = \`Bold 16px Arial\`;
+                    const fltTextWidth = objContext.measureText(strMessage).width;
+                    objCanvas.width = fltTextWidth + 20;
+                    objCanvas.height = 40;
+                    objContext.font = \`Bold 16px Arial\`;
+                    objContext.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                    objContext.textAlign = 'center';
+                    objContext.textBaseline = 'middle';
+                    objContext.fillText(strMessage, objCanvas.width / 2, objCanvas.height / 2);
+                    const objTexture = new THREE.CanvasTexture(objCanvas);
+                    const objSpriteMaterial = new THREE.SpriteMaterial({ map: objTexture });
+                    const objSprite = new THREE.Sprite(objSpriteMaterial);
+                    objSprite.scale.set(objCanvas.width / 2, objCanvas.height / 2, 1.0);
+                    objSprite.position.copy(objPosition);
+                    objScene.add(objSprite);
+                }
+
+                const INT_LABEL_OFFSET = 40;
+                createTextSprite('Front (Door)', new THREE.Vector3(fltVehicleW + INT_LABEL_OFFSET, objContainerCenter.y, objContainerCenter.z));
+                createTextSprite('Back', new THREE.Vector3(-INT_LABEL_OFFSET, objContainerCenter.y, objContainerCenter.z));
+                createTextSprite('Top', new THREE.Vector3(objContainerCenter.x, fltVehicleH + INT_LABEL_OFFSET, objContainerCenter.z));
+                createTextSprite('Bottom', new THREE.Vector3(objContainerCenter.x, -INT_LABEL_OFFSET, objContainerCenter.z));
+                
+                document.getElementById('reset-view-btn').addEventListener('click', () => { objControls.reset(); });
+                
+                let isPlaying = false;
+                let animationTimeout = null;
+                const playPauseBtn = document.getElementById('play-pause-btn');
+                const speedSlider = document.getElementById('speed-slider');
+                const progressBar = document.getElementById('progress-bar');
+                const animStatus = document.getElementById('animation-status');
+                
+                function getAnimationDelay() { return 1100 - (speedSlider.value * 100); }
+
+                function tween(obj, to, duration, onComplete) {
+                     const from = {};
+                     for (const key in to) from[key] = obj[key];
+                     const start = performance.now();
+                     function animateFrame() {
+                         const now = performance.now();
+                         let t = (now - start) / duration;
+                         if (t > 1) t = 1;
+                         for (const key in to) obj[key] = from[key] + (to[key] - from[key]) * t;
+                         if (t < 1) requestAnimationFrame(animateFrame);
+                         else if (onComplete) onComplete();
+                     }
+                     requestAnimationFrame(animateFrame);
+                }
+
+                let animationQueue = [];
+                let currentStepIndex = 0;
+
+                function processAnimationQueue() {
+                    if (!isPlaying || currentStepIndex >= animationQueue.length) {
+                        animStatus.textContent = 'Animation Complete.';
+                        playPauseBtn.textContent = 'Replay';
+                        isPlaying = false;
+                        return;
                     }
 
-                    const INT_LABEL_OFFSET = 40;
-                    // MODIFICATION: Added "Back" label back as requested.
-                    createTextSprite('Front (Door)', new THREE.Vector3(fltVehicleW + INT_LABEL_OFFSET, objContainerCenter.y, objContainerCenter.z));
-                    createTextSprite('Back', new THREE.Vector3(-INT_LABEL_OFFSET, objContainerCenter.y, objContainerCenter.z));
-                    createTextSprite('Top', new THREE.Vector3(objContainerCenter.x, fltVehicleH + INT_LABEL_OFFSET, objContainerCenter.z));
-                    createTextSprite('Bottom', new THREE.Vector3(objContainerCenter.x, -INT_LABEL_OFFSET, objContainerCenter.z));
-                    createTextSprite('Right Side', new THREE.Vector3(objContainerCenter.x, objContainerCenter.y, fltVehicleD + INT_LABEL_OFFSET));
-                    createTextSprite('Left Side', new THREE.Vector3(objContainerCenter.x, objContainerCenter.y, -INT_LABEL_OFFSET));
-
-                    document.getElementById('reset-view-btn').addEventListener('click', () => { objControls.reset(); });
+                    const step = animationQueue[currentStepIndex];
+                    const mesh = packageMeshes[step.item_id || step.item?.id];
+                    if (!mesh) {
+                        currentStepIndex++;
+                        if(isPlaying) animationTimeout = setTimeout(processAnimationQueue, 50);
+                        return;
+                    }
                     
-                    let isPlaying = false;
-                    let animationTimeout = null;
-                    const playPauseBtn = document.getElementById('play-pause-btn');
-                    const speedSlider = document.getElementById('speed-slider');
-                    const progressBar = document.getElementById('progress-bar');
-                    const animStatus = document.getElementById('animation-status');
-                    
-                    function getAnimationDelay() {
-                        return 1100 - (speedSlider.value * 100);
-                    }
+                    let duration = getAnimationDelay() * 0.5;
+                    let onComplete = () => {
+                        currentStepIndex++;
+                        progressBar.style.width = \`\${(currentStepIndex / animationQueue.length) * 100}%\`;
+                        if(isPlaying) animationTimeout = setTimeout(processAnimationQueue, getAnimationDelay());
+                    };
 
-                    // Simple tweening function for animations
-                    function tween(obj, to, duration, onUpdate, onComplete) {
-                         const from = {};
-                         for (const key in to) from[key] = obj[key];
-                         const start = performance.now();
-                         function animate() {
-                             const now = performance.now();
-                             let t = (now - start) / duration;
-                             if (t > 1) t = 1;
-                             for (const key in to) {
-                                 obj[key] = from[key] + (to[key] - from[key]) * t;
-                             }
-                             if(onUpdate) onUpdate();
-                             if (t < 1) {
-                                 requestAnimationFrame(animate);
-                             } else if(onComplete) {
-                                onComplete();
-                             }
-                         }
-                         requestAnimationFrame(animate);
-                    }
-
-                    if (mode === 'static') {
-                        packed_items.forEach(item => {
-                            const mesh = createPackageMesh(item);
-                            if(mesh) {
-                                packageMeshes[item.id] = mesh;
-                                objScene.add(mesh);
-                            }
-                        });
-                    } else if (mode === 'load') {
-                        let currentItemIndex = 0;
-                         // Sort from back-to-front, bottom-to-top to match a plausible loading sequence
-                        packed_items.sort((a,b) => (a.position_x - b.position_x) || (a.position_y - b.position_y) || (a.position_z - b.position_z));
-                        
-                        function nextLoadStep() {
-                            if (currentItemIndex >= packed_items.length) {
-                                animStatus.innerHTML = \`Loading Complete: \${packed_items.length} items loaded.\`;
-                                isPlaying = false;
-                                playPauseBtn.textContent = 'Replay';
-                                return;
-                            }
-                            const itemData = packed_items[currentItemIndex];
-                            const mesh = createPackageMesh(itemData);
-                            if (mesh) {
-                                packageMeshes[itemData.id] = mesh;
-                                const final_y = mesh.position.y;
-                                mesh.position.y = fltVehicleH + itemData.height; // Start from top
-                                objScene.add(mesh);
-                                // Animate the drop
-                                tween(mesh.position, { y: final_y }, 300, null, () => {
-                                     if (isPlaying && currentItemIndex < packed_items.length) {
-                                        animationTimeout = setTimeout(nextLoadStep, getAnimationDelay()/2);
-                                     } else if (currentItemIndex >= packed_items.length){
-                                        animStatus.innerHTML = \`Loading Complete: \${packed_items.length} items loaded.\`;
-                                        isPlaying = false;
-                                        playPauseBtn.textContent = 'Replay';
-                                     }
-                                });
-                            }
-                            currentItemIndex++;
-                            progressBar.style.width = \`\${(currentItemIndex / packed_items.length) * 100}%\`;
-                            animStatus.innerHTML = \`Loading Item \${currentItemIndex} of \${packed_items.length}...\`;
-                            
-                            // To prevent runaway recursion, only schedule next step inside tween completion
-                            if (!isPlaying) { clearTimeout(animationTimeout) }
-                        }
-                        
-                        playPauseBtn.onclick = () => {
-                           if (playPauseBtn.textContent === 'Replay') {
-                                Object.values(packageMeshes).forEach(m => objScene.remove(m));
-                                Object.keys(packageMeshes).forEach(k => delete packageMeshes[k]);
-                                currentItemIndex = 0;
-                                progressBar.style.width = '0%';
-                           }
-                           isPlaying = !isPlaying;
-                           playPauseBtn.textContent = isPlaying ? 'Pause' : 'Play';
-                           if(isPlaying) nextLoadStep(); else clearTimeout(animationTimeout);
-                        };
-                    } else if (mode === 'unload') {
-                         packed_items.forEach(item => {
-                             const mesh = createPackageMesh(item);
-                             if(mesh) packageMeshes[item.id] = mesh;
-                         });
-                         const itemsInBin = { ...packageMeshes };
-                         Object.values(itemsInBin).forEach(m => objScene.add(m));
-
-                        let relocationCount = 0;
-
-                        // --- REVISED GRAVITY SIMULATION FOR UNLOADING ---
-                        function _applyGravityAnimation(onComplete) {
-                             const remainingMeshes = Object.values(itemsInBin);
-                             let itemsToMove = [];
-                             let movedInPass;
-                             do {
-                                 movedInPass = false;
-                                 remainingMeshes.sort((a,b) => a.userData.position_y - b.userData.position_y);
-                                 for(const mesh of remainingMeshes) {
-                                     const iData = mesh.userData;
-                                     let highestSupportY = 0;
-                                     for(const otherMesh of remainingMeshes) {
-                                         if(otherMesh === mesh) continue;
-                                         const oData = otherMesh.userData;
-                                         if ( (oData.position_y + oData.height) < iData.position_y + 0.1) {
-                                              if (iData.position_x < oData.position_x + oData.width && oData.position_x < iData.position_x + iData.width &&
-                                                  iData.position_z < oData.position_z + oData.depth && oData.position_z < iData.position_z + iData.depth)
-                                              {
-                                                   highestSupportY = Math.max(highestSupportY, oData.position_y + oData.height);
-                                              }
-                                         }
-                                     }
-                                     if(Math.abs(iData.position_y - highestSupportY) > 0.1) {
-                                         const from_y = iData.position_y;
-                                         iData.position_y = highestSupportY;
-                                         const to_y = highestSupportY + iData.height/2;
-                                         mesh.userData.centered_pos.y = to_y; // Update centered pos as well
-                                         itemsToMove.push({mesh, from_y, to_y});
-                                         movedInPass = true;
-                                     }
-                                 }
-                             } while (movedInPass);
-                             
-                             if (itemsToMove.length === 0) {
-                                if(onComplete) onComplete();
-                                return;
-                             }
-                             
-                             let completedTweens = 0;
-                             for (const move of itemsToMove) {
-                                tween(move.mesh.position, {y: move.to_y}, 400, null, () => {
-                                    completedTweens++;
-                                    if(completedTweens === itemsToMove.length && onComplete) onComplete();
-                                });
-                             }
-                        }
-
-                        let animationQueue = [];
-                        let isProcessingQueue = false;
-
-                        function buildAnimationQueue() {
-                            const simBin = JSON.parse(JSON.stringify(packed_items)).reduce((m, p) => {m[p.id]=p; return m}, {});
-                            
-                            for (const stopId of deliverySequence) {
-                                let itemsForStop = Object.values(simBin).filter(p => allPackageInfo[p.id]?.stop_id === stopId)
-                                .sort((a,b) => (b.position_x - a.position_x) || (b.position_y - a.position_y));
-
-                                for(const target of itemsForStop) {
-                                     if(!simBin[target.id]) continue;
-                                     
-                                     const { position_x: tx, position_y: ty, position_z: tz, width: tdx, height: tdy, depth: tdz } = target;
-                                     const blockers = Object.values(simBin).filter(p => {
-                                         if (!p || p.id === target.id) return false;
-                                         const { position_x: ox, position_y: oy, position_z: oz, width: odx, height: ody, depth: odz } = p;
-                                         return (ox > tx) && (ty < oy + ody) && (oy < ty + tdy) && (tz < oz + odz) && (oz < tz + tdz);
-                                     }).sort((a,b) => b.position_x - a.position_x);
-
-                                     for(const blocker of blockers) {
-                                         if (simBin[blocker.id]) {
-                                            animationQueue.push({ action: 'relocate', item: blocker });
-                                            delete simBin[blocker.id];
-                                         }
-                                     }
-                                     animationQueue.push({ action: 'deliver', item: target });
-                                     delete simBin[target.id];
-                                }
-                            }
-                        }
-
-                        function processAnimationQueue() {
-                            if (!isPlaying || isProcessingQueue) return;
-                            
-                            if (animationQueue.length === 0) {
-                                _applyGravityAnimation(() => {
-                                    animStatus.innerHTML = \`Unloading Complete. Total Relocations: \${relocationCount}\`;
-                                    isPlaying = false;
-                                    playPauseBtn.textContent = 'Replay';
-                                });
-                                return;
-                            }
-                            
-                            isProcessingQueue = true;
-                            const step = animationQueue.shift();
-                            const mesh = itemsInBin[step.item.id];
-
-                            if(!mesh){ // already removed
-                                 isProcessingQueue = false;
-                                 if (isPlaying) setTimeout(processAnimationQueue, 50);
-                                 return;
-                            }
-                            
-                            if (step.action === 'relocate') {
-                                relocationCount++;
-                                animStatus.innerHTML = \`Relocating Item. Relocations: \${relocationCount}\`;
-                                objScene.remove(mesh);
-                                delete itemsInBin[step.item.id];
-                            } else {
-                                animStatus.innerHTML = \`Delivering \${step.item.id}\`;
-                                objScene.remove(mesh);
-                                delete itemsInBin[step.item.id];
-                            }
-
-                            const itemsProcessed = packed_items.length - animationQueue.length;
-                            progressBar.style.width = \`\${(itemsProcessed / packed_items.length) * 100}%\`;
-
-                             _applyGravityAnimation(() => {
-                                 isProcessingQueue = false;
-                                 if(isPlaying) animationTimeout = setTimeout(processAnimationQueue, getAnimationDelay());
+                    switch(step.action) {
+                        case 'load':
+                            animStatus.textContent = \`Loading item \${step.item.id}\`;
+                            mesh.position.y = fltVehicleH + mesh.userData.height; // Start above truck
+                            objScene.add(mesh);
+                            tween(mesh.position, { y: mesh.userData.final_position.y }, duration, onComplete);
+                            break;
+                        case 'target':
+                            animStatus.textContent = \`Targeting \${step.item_id}\`;
+                            mesh.material = new THREE.MeshBasicMaterial({ color: 0xFFFF00, wireframe: true });
+                            onComplete(); // No delay for targeting
+                            break;
+                        case 'relocate':
+                            animStatus.textContent = \`Relocating \${step.item_id}...\`;
+                             const relocatePos = { x: fltVehicleW + 50, y: fltVehicleH / 2, z: mesh.position.z };
+                             tween(mesh.position, relocatePos, duration, () => {
+                                 objScene.remove(mesh); // Remove after moving it out of sight
+                                 onComplete();
                              });
-                        }
-                        
-                         playPauseBtn.onclick = () => {
-                           if (playPauseBtn.textContent === 'Replay') {
-                                Object.values(packageMeshes).forEach(m => {
-                                    m.material = m.userData.originalMaterial;
-                                    m.position.copy(m.userData.centered_pos);
-                                    m.userData.position_y = m.userData.centered_pos.y - m.userData.height / 2;
-                                    objScene.add(m);
-                                });
-                                Object.assign(itemsInBin, packageMeshes);
-                                relocationCount = 0;
-                                progressBar.style.width = '0%';
-                                animationQueue = [];
-                                isProcessingQueue = false;
-                           }
-                           isPlaying = !isPlaying;
-                           playPauseBtn.textContent = isPlaying ? 'Pause' : 'Play';
-                           if(isPlaying) {
-                              if (animationQueue.length === 0 && !isProcessingQueue) buildAnimationQueue();
-                              processAnimationQueue();
-                           } else {
-                               clearTimeout(animationTimeout);
-                           }
-                        };
+                            break;
+                        case 'deliver':
+                            animStatus.textContent = \`Delivering \${step.item_id}!\`;
+                            mesh.material = mesh.userData.originalMaterial; // Revert material from target highlight
+                            const deliverPos = { x: fltVehicleW + 50, y: mesh.position.y, z: mesh.position.z };
+                            tween(mesh.position, deliverPos, duration, () => {
+                                 objScene.remove(mesh);
+                                 onComplete();
+                             });
+                            break;
+                        case 'settle':
+                             animStatus.textContent = 'Items settling due to gravity...';
+                             const new_centered_y = step.new_y_pos + mesh.userData.height / 2;
+                             tween(mesh.position, { y: new_centered_y }, duration * 0.8, onComplete);
+                             break;
                     }
-                    
-                    const objRaycaster = new THREE.Raycaster();
-                    const objMouse = new THREE.Vector2();
-                    let objSelectedObject = null;
-                    const objHighlightMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFF00, transparent: true, opacity: 0.8 });
-                    const objInfoDiv = document.getElementById('item-info-panel');
-                    
-                    window.addEventListener('click', (event) => {
-                        objMouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-                        objMouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
-                        objRaycaster.setFromCamera(objMouse, objCamera);
-                        
-                        const meshesForIntersect = Object.values(packageMeshes).filter(m => m.parent);
-                        const arrIntersects = objRaycaster.intersectObjects(meshesForIntersect);
-                        
-                        if (objSelectedObject) {
-                             if (objSelectedObject.userData) {
-                                objSelectedObject.material = objSelectedObject.userData.originalMaterial;
-                             }
-                            objSelectedObject = null;
-                        }
-                        objInfoDiv.style.display = 'none';
-                        
-                        if (arrIntersects.length > 0) {
-                            objSelectedObject = arrIntersects[0].object;
-                            objSelectedObject.material = objHighlightMaterial;
-                            const objData = objSelectedObject.userData;
-                            objInfoDiv.style.display = 'block';
-                            objInfoDiv.innerHTML = \`
-                                <strong>Product ID:</strong> \${objData.id}<br>
-                                <strong>Stop ID:</strong> \${allPackageInfo[objData.id]?.stop_id}<br>
-                                <strong>Volume:</strong> \${Math.round(objData.volume).toLocaleString()} cm³<br>
-                                <strong>Dimensions:</strong> \${objData.width}×\${objData.height}×\${objData.depth} cm
-                            \`;
-                        }
-                    });
+                }
+                
+                function setupAndPlay() {
+                    isPlaying = !isPlaying;
+                    playPauseBtn.textContent = isPlaying ? 'Pause' : 'Play';
+                    if (isPlaying) {
+                        processAnimationQueue();
+                    } else {
+                        clearTimeout(animationTimeout);
+                    }
+                }
 
-                    function animate() {
-                        requestAnimationFrame(animate);
-                        objControls.update();
-                        objRenderer.render(objScene, objCamera);
+                playPauseBtn.addEventListener('click', () => {
+                    if (playPauseBtn.textContent === 'Replay') {
+                        Object.values(packageMeshes).forEach(m => objScene.remove(m));
+                        if(mode === 'unload' || mode === 'static') {
+                             Object.values(packageMeshes).forEach(m => {
+                                m.position.copy(m.userData.final_position);
+                                m.material = m.userData.originalMaterial;
+                                objScene.add(m)
+                            });
+                        }
+                        currentStepIndex = 0;
+                        progressBar.style.width = '0%';
+                        isPlaying = false;
                     }
-                    animate();
+                    setupAndPlay();
+                });
+
+                if (mode === 'static') {
+                    Object.values(packageMeshes).forEach(mesh => objScene.add(mesh));
+                } else if (mode === 'load') {
+                    animationQueue = loading_sequence;
+                } else if (mode === 'unload') {
+                    animationQueue = unloading_sequence;
+                    Object.values(packageMeshes).forEach(mesh => objScene.add(mesh));
+                }
+
+                // Raycasting for item selection
+                const objRaycaster = new THREE.Raycaster();
+                const objMouse = new THREE.Vector2();
+                let objSelectedObject = null;
+                const objHighlightMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFF00, transparent: true, opacity: 0.8 });
+                const objInfoDiv = document.getElementById('item-info-panel');
+                
+                window.addEventListener('click', (event) => {
+                    objMouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                    objMouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+                    objRaycaster.setFromCamera(objMouse, objCamera);
                     
-                    window.addEventListener('resize', () => {
-                        objCamera.aspect = window.innerWidth / window.innerHeight;
-                        objCamera.updateProjectionMatrix();
-                        objRenderer.setSize(window.innerWidth, window.innerHeight);
-                    }, false);
-                <\/script>
-            </body>
-            </html>
-        `;
-        
-        const objVizWindow = window.open("", "3D Visualization", "width=1200,height=800");
+                    const meshesForIntersect = Object.values(packageMeshes).filter(m => m.parent === objScene);
+                    const arrIntersects = objRaycaster.intersectObjects(meshesForIntersect);
+                    
+                    if (objSelectedObject) {
+                        if (objSelectedObject.userData.originalMaterial) {
+                            objSelectedObject.material = objSelectedObject.userData.originalMaterial;
+                        }
+                        objSelectedObject = null;
+                    }
+                    objInfoDiv.style.display = 'none';
+                    
+                    if (arrIntersects.length > 0) {
+                        objSelectedObject = arrIntersects[0].object;
+                        if (!objSelectedObject.material.wireframe) { // Don't overwrite target highlight
+                            objSelectedObject.material = objHighlightMaterial;
+                        }
+                        const objData = objSelectedObject.userData;
+                        objInfoDiv.style.display = 'block';
+                        objInfoDiv.innerHTML = \`
+                            <strong>Product ID:</strong> \${objData.id}<br>
+                            <strong>Volume:</strong> \${Math.round(objData.volume).toLocaleString()} cm³<br>
+                            <strong>Dimensions:</strong> \${objData.width}×\${objData.height}×\${objData.depth} cm
+                        \`;
+                    }
+                });
+
+                function animate() {
+                    requestAnimationFrame(animate);
+                    objControls.update();
+                    objRenderer.render(objScene, objCamera);
+                }
+                animate();
+                
+                window.addEventListener('resize', () => {
+                    objCamera.aspect = window.innerWidth / window.innerHeight;
+                    objCamera.updateProjectionMatrix();
+                    objRenderer.setSize(window.innerWidth, window.innerHeight);
+                }, false);
+            <\/script>
+        </body>
+        </html>
+    `;
+    
+    const objVizWindow = window.open("", "3D Visualization", "width=1200,height=800");
+    if (objVizWindow) {
         objVizWindow.document.open();
         objVizWindow.document.write(strHtmlContent);
         objVizWindow.document.close();
@@ -1202,5 +1071,8 @@ document.addEventListener("DOMContentLoaded", () =>
                 console.log("Visualization window closed, button re-enabled.");
             }
         }, 500);
+    } else {
+        alert("Please allow pop-ups for this site to view the visualization.");
     }
+}
 });

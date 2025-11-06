@@ -167,13 +167,13 @@ def _fnGetOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFA
             for str_packageId, dict_details in dict_packagesAtStop.items():
                 dict_dims = dict_details.get('dimensions', {})
                 try:
-                    flt_h = float(dict_dims.get('height_cm', 0))
-                    flt_w = float(dict_dims.get('width_cm', 0))
-                    flt_d = float(dict_dims.get('depth_cm', 0))
+                    # MODIFICATION: Sanitize dimensions. If a dimension is 0 or missing, set it to 1.0.
+                    flt_h = float(dict_dims.get('height_cm', 0)) or 1.0
+                    flt_w = float(dict_dims.get('width_cm', 0)) or 1.0
+                    flt_d = float(dict_dims.get('depth_cm', 0)) or 1.0
                     
-                    # --- MODIFICATION ---
-                    # CRITICAL VALIDATION: Only include items with valid, non-zero dimensions.
-                    # This ensures the "Number of Products Loaded" count is accurate from the start.
+                    # --- CRITICAL VALIDATION ---
+                    # Ensure dimensions are positive before creating the package.
                     if (flt_h > 0 and flt_w > 0 and flt_d > 0):
                         flt_volume = flt_h * flt_w * flt_d
                         arr_packagesForThisRoute.append({
@@ -182,13 +182,14 @@ def _fnGetOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFA
                             'service_time': float(dict_details.get('planned_service_time_seconds', 0))
                         })
                 except (ValueError, TypeError):
+                    # If dimensions are malformed, skip this package.
                     continue
 
         flt_totalVolume = sum(p['volume'] for p in arr_packagesForThisRoute)
         
         # --- THE VALIDATION CRITERION ---
-        # A route is considered a valid sample if its total package volume is less than the vehicle capacity.
-        if flt_totalVolume < fltVehicleCapacityCm3:
+        # A route is valid if it has packages and their total volume fits in the truck.
+        if 0 < flt_totalVolume < fltVehicleCapacityCm3:
             print(f"Found and caching valid display route: {str_routeId}")
 
             # Construct the metadata object specifically for THIS SINGLE ROUTE.
@@ -198,27 +199,21 @@ def _fnGetOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFA
                 'width': math.floor(flt_dimension), 'height': math.floor(flt_dimension), 'depth': math.floor(flt_dimension),
                 'total_package_volume': flt_totalVolume,
                 'total_service_time': sum(p['service_time'] for p in arr_packagesForThisRoute),
-                # The number of packages now correctly reflects only the valid, filtered items.
                 'num_packages': len(arr_packagesForThisRoute),
             }
 
             # Combine the metadata and this route's packages into a single object for caching.
             dict_dataToCache = { 'metadata': dict_metadata, 'packages': arr_packagesForThisRoute }
             
-            # Write this single-route data to a JSON file in the cache directory.
             with open(str_cacheFilepath, 'w') as f:
                 json.dump(dict_dataToCache, f)
             print(f"Successfully created single-route cache: {str_cacheFilename}")
             
-            # Clean up the large source dataframes from memory.
             del obj_dfRouteDataCache, dict_packageDataCache
             gc.collect()
-
-            # IMPORTANT: Return the data immediately after finding the first valid route.
             return dict_dataToCache
             
-    # If the loop finishes and no single, loadable route was found, return None.
-    # Clean up memory before returning.
+    # If no valid route was found after checking all possibilities.
     del obj_dfRouteDataCache, dict_packageDataCache
     gc.collect()
     return None

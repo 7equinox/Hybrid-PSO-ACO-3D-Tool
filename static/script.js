@@ -842,7 +842,6 @@ function _openVisualizationWindow(mode = 'static')
                     return objItemMesh;
                 }
 
-                // Pre-create all meshes so they exist for the simulation.
                 packed_items_data.forEach(item => {
                     const mesh = createPackageMesh(item);
                     if (mesh) packageMeshes[item.id] = mesh;
@@ -875,8 +874,6 @@ function _openVisualizationWindow(mode = 'static')
                 const INT_LABEL_OFFSET = 40;
                 createTextSprite('Front (Door)', new THREE.Vector3(fltVehicleW + INT_LABEL_OFFSET, objContainerCenter.y, objContainerCenter.z));
                 createTextSprite('Back', new THREE.Vector3(-INT_LABEL_OFFSET, objContainerCenter.y, objContainerCenter.z));
-                createTextSprite('Top', new THREE.Vector3(objContainerCenter.x, fltVehicleH + INT_LABEL_OFFSET, objContainerCenter.z));
-                createTextSprite('Bottom', new THREE.Vector3(objContainerCenter.x, -INT_LABEL_OFFSET, objContainerCenter.z));
                 
                 document.getElementById('reset-view-btn').addEventListener('click', () => { objControls.reset(); });
                 
@@ -933,26 +930,26 @@ function _openVisualizationWindow(mode = 'static')
                     switch(step.action) {
                         case 'load':
                             animStatus.textContent = \`Loading item \${step.item.id}\`;
-                            mesh.position.y = fltVehicleH + mesh.userData.height; // Start above truck
+                            mesh.position.y = fltVehicleH + mesh.userData.height;
                             objScene.add(mesh);
-                            tween(mesh.position, { y: mesh.userData.final_position.y }, duration, onComplete);
+                            tween(mesh.position, mesh.userData.final_position, duration, onComplete);
                             break;
                         case 'target':
                             animStatus.textContent = \`Targeting \${step.item_id}\`;
                             mesh.material = new THREE.MeshBasicMaterial({ color: 0xFFFF00, wireframe: true });
-                            onComplete(); // No delay for targeting
+                            setTimeout(onComplete, 50); // Small delay for visibility
                             break;
                         case 'relocate':
                             animStatus.textContent = \`Relocating \${step.item_id}...\`;
                              const relocatePos = { x: fltVehicleW + 50, y: fltVehicleH / 2, z: mesh.position.z };
                              tween(mesh.position, relocatePos, duration, () => {
-                                 objScene.remove(mesh); // Remove after moving it out of sight
+                                 objScene.remove(mesh);
                                  onComplete();
                              });
                             break;
                         case 'deliver':
                             animStatus.textContent = \`Delivering \${step.item_id}!\`;
-                            mesh.material = mesh.userData.originalMaterial; // Revert material from target highlight
+                            mesh.material = mesh.userData.originalMaterial;
                             const deliverPos = { x: fltVehicleW + 50, y: mesh.position.y, z: mesh.position.z };
                             tween(mesh.position, deliverPos, duration, () => {
                                  objScene.remove(mesh);
@@ -962,7 +959,28 @@ function _openVisualizationWindow(mode = 'static')
                         case 'settle':
                              animStatus.textContent = 'Items settling due to gravity...';
                              const new_centered_y = step.new_y_pos + mesh.userData.height / 2;
-                             tween(mesh.position, { y: new_centered_y }, duration * 0.8, onComplete);
+                             tween(mesh.position, { y: new_centered_y }, duration * 0.8, () => {
+                                mesh.userData.final_position.y = new_centered_y;
+                                onComplete();
+                             });
+                             break;
+                        case 'return_relocated':
+                             animStatus.textContent = \`Returning \${step.item_id}\`;
+                             const new_pos = step.new_pos;
+                             const new_centered_pos = {
+                                 x: new_pos[0] + mesh.userData.width / 2,
+                                 y: new_pos[1] + mesh.userData.height / 2,
+                                 z: new_pos[2] + mesh.userData.depth / 2,
+                             };
+                             const returnStartPos = { x: fltVehicleW + 50, y: new_centered_pos.y, z: new_centered_pos.z };
+                             mesh.position.set(returnStartPos.x, returnStartPos.y, returnStartPos.z);
+                             mesh.material = mesh.userData.originalMaterial;
+                             objScene.add(mesh);
+                             tween(mesh.position, new_centered_pos, duration, () => {
+                                // Update its final position since it moved.
+                                mesh.userData.final_position = new_centered_pos;
+                                onComplete();
+                             });
                              break;
                     }
                 }
@@ -980,12 +998,21 @@ function _openVisualizationWindow(mode = 'static')
                 playPauseBtn.addEventListener('click', () => {
                     if (playPauseBtn.textContent === 'Replay') {
                         Object.values(packageMeshes).forEach(m => objScene.remove(m));
+                        packed_items_data.forEach(item => {
+                             const mesh = packageMeshes[item.id];
+                             if(mesh) {
+                                const original_centered = {
+                                    x: item.position_x + item.width / 2,
+                                    y: item.position_y + item.height / 2,
+                                    z: item.position_z + item.depth / 2,
+                                };
+                                mesh.position.copy(original_centered);
+                                mesh.userData.final_position = original_centered;
+                                mesh.material = mesh.userData.originalMaterial;
+                             }
+                        });
                         if(mode === 'unload' || mode === 'static') {
-                             Object.values(packageMeshes).forEach(m => {
-                                m.position.copy(m.userData.final_position);
-                                m.material = m.userData.originalMaterial;
-                                objScene.add(m)
-                            });
+                             Object.values(packageMeshes).forEach(m => objScene.add(m));
                         }
                         currentStepIndex = 0;
                         progressBar.style.width = '0%';
@@ -1003,7 +1030,9 @@ function _openVisualizationWindow(mode = 'static')
                     Object.values(packageMeshes).forEach(mesh => objScene.add(mesh));
                 }
 
-                // Raycasting for item selection
+                // ... Raycasting and other boilerplate code is the same ...
+                
+                 // Raycasting for item selection
                 const objRaycaster = new THREE.Raycaster();
                 const objMouse = new THREE.Vector2();
                 let objSelectedObject = null;
@@ -1019,7 +1048,7 @@ function _openVisualizationWindow(mode = 'static')
                     const arrIntersects = objRaycaster.intersectObjects(meshesForIntersect);
                     
                     if (objSelectedObject) {
-                        if (objSelectedObject.userData.originalMaterial) {
+                        if (objSelectedObject.userData.originalMaterial && !objSelectedObject.material.wireframe) {
                             objSelectedObject.material = objSelectedObject.userData.originalMaterial;
                         }
                         objSelectedObject = null;
@@ -1028,7 +1057,7 @@ function _openVisualizationWindow(mode = 'static')
                     
                     if (arrIntersects.length > 0) {
                         objSelectedObject = arrIntersects[0].object;
-                        if (!objSelectedObject.material.wireframe) { // Don't overwrite target highlight
+                        if (!objSelectedObject.material.wireframe) { 
                             objSelectedObject.material = objHighlightMaterial;
                         }
                         const objData = objSelectedObject.userData;
@@ -1053,6 +1082,7 @@ function _openVisualizationWindow(mode = 'static')
                     objCamera.updateProjectionMatrix();
                     objRenderer.setSize(window.innerWidth, window.innerHeight);
                 }, false);
+
             <\/script>
         </body>
         </html>
@@ -1068,7 +1098,6 @@ function _openVisualizationWindow(mode = 'static')
             if (objVizWindow.closed) {
                 clearInterval(intCheckWindowClosedInterval);
                 g_objVisualizeMenuBtn.disabled = false;
-                console.log("Visualization window closed, button re-enabled.");
             }
         }, 500);
     } else {

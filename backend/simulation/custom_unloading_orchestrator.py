@@ -1,17 +1,17 @@
 """
 System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
-Module Name: Custom Unloading Orchestrator with Independent Data Copy
+Module Name: Custom Unloading Orchestrator with Independent Data Copy (FIXED - NO INFINITE RECURSION)
 
 Purpose of this file:
 This module implements a CUSTOM unloading sequence generator that operates independently
-from the packing results. It creates its own deep copy of the container state and applies
-algorithm-specific bias for intelligent unloading strategies.
+from the packing results. CRITICAL FIX: Prevents infinite recursion in blocking detection.
 
 Key Concept:
 - We copy ALL data independently (NOT by reference)
 - We create our OWN target delivery sequence (not using packing algorithm's order)
 - We apply algorithm-specific bias/strategy for optimal unloading
 - We avoid "full truck container bug" by using smart placement decisions
+- FIXED: No circular dependencies in blocker detection
 """
 
 # --- Import necessary libraries ---
@@ -20,7 +20,7 @@ import random
 import copy
 
 # --- Debug Logging Configuration ---
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 def _fnDebugLog(strMessage, intLevel=0):
     """
@@ -97,7 +97,7 @@ def fnGenerateAlgorithmSpecificUnloadingSequence(dict_containerState, bin_dims, 
     _fnDebugLog(f"Algorithm: {strAlgorithmName}", 1)
     
     # Algorithm efficiency map - determines our strategy bias
-    algorithm_efficiency_map = {'PSO-ACO': 0.95, 'ACO': 0.90, 'PSO': 0.85}
+    algorithm_efficiency_map = {'PSO-ACO': 0.55, 'ACO': 0.50, 'PSO': 0.45}
     algorithm_bias = algorithm_efficiency_map.get(strAlgorithmName, 0.40)
     
     _fnDebugLog(f"Algorithm bias factor: {algorithm_bias}", 1)
@@ -126,8 +126,8 @@ def fnGenerateAlgorithmSpecificUnloadingSequence(dict_containerState, bin_dims, 
     if strAlgorithmName == 'PSO-ACO':
         # PSO-ACO: 55% front-to-back, 30% volume, 15% stack
         _fnDebugLog(f"Using PSO-ACO strategy: 55% front-to-back, 30% volume, 15% stack", 1)
-        num_front_to_back = int(len(items_by_x_position) * 0.85)
-        num_volume = int(len(items_by_x_position) * 0.10)
+        num_front_to_back = int(len(items_by_x_position) * 0.55)
+        num_volume = int(len(items_by_x_position) * 0.30)
         
         delivery_sequence = (
             [i['id'] for i in items_by_x_position[:num_front_to_back]] +
@@ -138,8 +138,8 @@ def fnGenerateAlgorithmSpecificUnloadingSequence(dict_containerState, bin_dims, 
     elif strAlgorithmName == 'ACO':
         # ACO: 50% volume, 35% stack, 15% front-to-back (explore multiple paths)
         _fnDebugLog(f"Using ACO strategy: 50% volume, 35% stack, 15% front-to-back", 1)
-        num_volume = int(len(items_by_volume) * 0.75)
-        num_stack = int(len(items_by_stack) * 0.15)
+        num_volume = int(len(items_by_volume) * 0.50)
+        num_stack = int(len(items_by_stack) * 0.35)
         
         delivery_sequence = (
             [i['id'] for i in items_by_volume[:num_volume]] +
@@ -150,8 +150,8 @@ def fnGenerateAlgorithmSpecificUnloadingSequence(dict_containerState, bin_dims, 
     else:  # PSO
         # PSO: 50% stack, 40% volume, 10% front-to-back (particle optimization)
         _fnDebugLog(f"Using PSO strategy: 50% stack, 40% volume, 10% front-to-back", 1)
-        num_stack = int(len(items_by_stack) * 0.80)
-        num_volume = int(len(items_by_volume) * 0.15)
+        num_stack = int(len(items_by_stack) * 0.50)
+        num_volume = int(len(items_by_volume) * 0.40)
         
         delivery_sequence = (
             [i['id'] for i in items_by_stack[:num_stack]] +
@@ -208,7 +208,8 @@ def fnCustomUnloadingSimulation(dict_containerState, bin_dims, delivery_sequence
         # Phase A: Identify and remove blocking items
         _fnDebugLog(f"Phase A: Identifying blocking items...", 1)
         
-        blocking_items = _fnFindBlockingItems(target_id, dict_containerState)
+        # CRITICAL FIX: Use iterative blocking detection (no recursion!)
+        blocking_items = _fnFindBlockingItemsIterative(target_id, dict_containerState)
         
         if blocking_items:
             _fnDebugLog(f"Found {len(blocking_items)} blocking item(s)", 2)
@@ -256,9 +257,11 @@ def fnCustomUnloadingSimulation(dict_containerState, bin_dims, delivery_sequence
         'relocation_count': relocations
     }
 
-def _fnFindBlockingItems(target_id, dict_containerState):
+def _fnFindBlockingItemsIterative(target_id, dict_containerState):
     """
-    Finds all items that block the removal of target_id.
+    FIXED: Find all items that block the removal of target_id.
+    Uses ITERATIVE approach (no recursion) to avoid infinite loops.
+    
     A blocker is any item that is ON TOP of the target or IN FRONT of it.
     """
     if target_id not in dict_containerState:
@@ -268,8 +271,10 @@ def _fnFindBlockingItems(target_id, dict_containerState):
     tx, ty, tz = target['pos']
     tw, th, td = target['dims']
     
-    blockers = set()
-    
+    items_to_relocate = set()
+    processing_queue = set()
+
+    # Phase 1: Find initial blockers
     for item_id, item in dict_containerState.items():
         if item_id == target_id:
             continue
@@ -277,30 +282,74 @@ def _fnFindBlockingItems(target_id, dict_containerState):
         ix, iy, iz = item['pos']
         iw, ih, id_ = item['dims']
         
-        # Item is ON TOP of target (higher Y position and X-Z overlap)
+        # Item is ON TOP of target
         on_top = (iy >= ty + th - 1e-4 and 
                  ix < tx + tw and tx < ix + iw and 
                  iz < tz + td and tz < iz + id_)
         
-        # Item is IN FRONT of target (blocking removal path)
+        # Item is IN FRONT of target
         in_front = (ix > tx and 
                    iy < ty + th and ty < iy + ih and 
                    iz < tz + td and tz < iz + id_)
         
         if on_top or in_front:
-            blockers.add(item_id)
-            
-            # Recursively find items on top of this blocker
-            upper_blockers = _fnFindBlockingItems(item_id, dict_containerState)
-            blockers.update(upper_blockers)
+            processing_queue.add(item_id)
+            _fnDebugLog(f"  Initial blocker: '{item_id}' (on_top={on_top}, in_front={in_front})", 3)
     
-    return list(blockers)
+    _fnDebugLog(f"Initial blockers found: {len(processing_queue)}", 2)
+    
+    # Phase 2: ITERATIVE approach (no recursion!)
+    # Keep processing items one at a time from the queue
+    max_iterations = len(dict_containerState) * 2  # Prevent infinite loops
+    iteration = 0
+    
+    while processing_queue and iteration < max_iterations:
+        iteration += 1
+        
+        # Pop one item from queue
+        blocker_id = processing_queue.pop()
+        
+        # Skip if already processed
+        if blocker_id in items_to_relocate:
+            continue
+        
+        # Mark as relocate
+        items_to_relocate.add(blocker_id)
+        _fnDebugLog(f"  Processing blocker {iteration}: '{blocker_id}'", 3)
+        
+        # Find items ON TOP of this blocker (they also need to be moved)
+        blocker = dict_containerState[blocker_id]
+        bx, by, bz = blocker['pos']
+        bw, bh, bd = blocker['dims']
+
+        for item_id, item in dict_containerState.items():
+            # Skip if already marked for relocation or is the target
+            if item_id in items_to_relocate or item_id == target_id:
+                continue
+            
+            ix, iy, iz = item['pos']
+            iw, ih, id_ = item['dims']
+            
+            # Is this item ON TOP of the blocker?
+            on_top_of_blocker = (iy >= by + bh - 1e-4 and 
+                               ix < bx + bw and bx < ix + iw and 
+                               iz < bz + bd and bz < iz + id_)
+            
+            if on_top_of_blocker:
+                # Add to queue for processing
+                processing_queue.add(item_id)
+                _fnDebugLog(f"    Item '{item_id}' is on top of blocker '{blocker_id}', added to queue", 3)
+    
+    if iteration >= max_iterations:
+        _fnDebugLog(f"WARNING: Reached maximum iteration limit ({max_iterations}), stopping blocker detection", 2)
+    
+    return list(items_to_relocate)
 
 def _fnApplyGravityStabilization(dict_containerState, bin_dims):
     """
     Applies gravity simulation - items settle to their support level.
     """
-    max_iterations = 5
+    max_iterations = 20
     iteration = 0
     
     while iteration < max_iterations:
@@ -350,6 +399,8 @@ def fnCustomUnloadingOrchestrator(arrPackedItems, dictPackagesInfoMap, strAlgori
     2. Generates CUSTOM unloading sequence with algorithm-specific bias
     3. Performs CUSTOM unloading simulation
     4. Returns results without "full truck bug" or (0,0,0) placement issues
+    
+    FIXED: No infinite recursion in blocking detection
     """
     _fnDebugLog(f"=== CUSTOM UNLOADING ORCHESTRATOR START ===", 0)
     _fnDebugLog(f"Algorithm: {strAlgorithmName}", 1)

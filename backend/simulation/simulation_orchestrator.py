@@ -5,8 +5,9 @@ Module Name: Simulation Orchestration
 Purpose of this file:
 This module is the heart of the 'Experimentation Stage' as defined in the research
 methodology. It acts as the master conductor for a single, complete experimental
-run.
+run. Now integrated with custom unloading orchestrator.
 """
+
 # --- Import necessary libraries ---
 import time
 import random
@@ -18,10 +19,15 @@ from py3dbp import Packer, Bin, Item
 # --- Import Custom Application Modules ---
 from backend.data_management.data_manager import fnGetDisplayDataForVehicle
 from backend.simulation.performance_metrics import fnCalculateAllMetrics
+from backend.simulation.custom_unloading_orchestrator import fnCustomUnloadingOrchestrator
 from backend.simulation.custom_exceptions import CancelledException
 from backend.algorithms.pso_algorithm import fnRunPsoAlgorithm
 from backend.algorithms.aco_algorithm import fnRunAcoAlgorithm
 from backend.algorithms.hybrid_pso_aco_algorithm import fnRunHybridPsoAcoAlgorithm
+
+# --- EXPORT FUNCTION ---
+# This ensures the function can be imported properly
+__all__ = ['fnOrchestrateSimulationRun']
 
 def _create_error_response(error_message, algorithm_name, capacity_cm3):
     """Creates a structured, default error response to prevent frontend crashes."""
@@ -99,7 +105,27 @@ def _fnCalculateRectangularDimensions(fltVolumeCm3):
         return {"width": 0, "height": 0, "depth": 0}
 
 def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled, dictProgressTracker):
-    """Main orchestrator for a single experimental run."""
+    """
+    Main orchestrator for a single experimental run.
+    
+    This is the primary function called by main_app.py to execute a complete simulation.
+    It handles:
+    1. Loading vehicle and package data
+    2. Running the selected algorithm
+    3. Performing final packing consolidation
+    4. Generating unloading sequences
+    5. Collecting metrics
+    
+    Args:
+        strAlgorithmName (str): Name of algorithm ('PSO', 'ACO', 'PSO-ACO')
+        fltCapacityCm3 (float): Vehicle capacity in cubic centimeters
+        dictCancellationFlag (dict): Shared flag for cancellation {'is_cancelled': bool}
+        blnIsDynamicConstraintEnabled (bool): Whether to enable dynamic constraints
+        dictProgressTracker (dict): Shared dict for progress updates
+    
+    Returns:
+        dict: Complete simulation results including metrics and sequences
+    """
     try:
         if dictCancellationFlag['is_cancelled']:
             raise CancelledException()
@@ -191,37 +217,20 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         _fnPostProcessPacking(final_packer.bins[0])
         num_loaded = len(final_packer.bins[0].items)
 
-        final_metrics = fnCalculateAllMetrics(final_packer.bins[0].items, float(obj_bin.get_volume()), arr_packagesInfo, strAlgorithmName)
+        # Extract bin dimensions to pass to unloading orchestrator
+        bin_dims_for_metrics = [float(obj_bin.width), float(obj_bin.height), float(obj_bin.depth)]
+        dict_packages_map = {p['id']: p for p in arr_packagesInfo}
         
-        # --- REVISED METRIC MANIPULATION ---
-        base_rearrangements = int(final_metrics.get('relocation_count', 0))
+        # CUSTOM UNLOADING: Use the custom orchestrator instead of default
+        custom_unloading_result = fnCustomUnloadingOrchestrator(
+            final_packer.bins[0].items,
+            dict_packages_map,
+            strAlgorithmName,
+            bin_dims_for_metrics
+        )
         
-        if strAlgorithmName == 'PSO-ACO':
-            # Hybrid PSO-ACO: Best overall performance
-            computation_time *= random.uniform(0.85, 0.90)  # Fastest
-            mem_usage *= random.uniform(0.88, 0.92)  # Most memory efficient
-            rearrangement_multiplier = random.uniform(0.65, 0.75)  # Least relocations
-            volume_utilization = random.uniform(82, 85)  # Best packing density (LOWEST %, uses all items efficiently)
-            
-        elif strAlgorithmName == 'ACO':
-            # ACO: Second best, but slower due to nature of algorithm
-            computation_time *= random.uniform(1.25, 1.35)  # Slowest (ACO explores more paths)
-            mem_usage *= random.uniform(1.08, 1.15)  # Least memory efficient
-            rearrangement_multiplier = random.uniform(0.80, 0.88)  # Medium relocations
-            volume_utilization = random.uniform(85, 88)  # Second best packing density
-            
-        else:  # PSO
-            # PSO: Good baseline performance
-            computation_time *= random.uniform(0.95, 1.05)  # Medium speed
-            mem_usage *= random.uniform(0.98, 1.05)  # Medium memory efficiency
-            rearrangement_multiplier = random.uniform(0.95, 1.08)  # Most relocations
-            volume_utilization = random.uniform(88, 92)  # Worst packing density (HIGHEST %)
-        
-        # Calculate rearrangements based on multiplier
-        rearrangements = int(base_rearrangements * rearrangement_multiplier)
-        
-        # CRITICAL FIX: Relocation count = num_loaded + rearrangements
-        final_relocation_count = num_loaded + rearrangements
+        # Calculate final metrics
+        final_metrics = fnCalculateAllMetrics(final_packer.bins[0].items, float(obj_bin.get_volume()), arr_packagesInfo, strAlgorithmName, bin_dims_for_metrics)
         
         details = []
         service_time = 0
@@ -248,12 +257,12 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
             'metrics': {
                 'computation_time': round(float(computation_time), 2),
                 'memory_usage_mb': round(float(mem_usage), 2),
-                'volume_utilization': round(float(volume_utilization), 2),
-                'relocation_count': int(final_relocation_count)
+                'volume_utilization': round(float(final_metrics['volume_utilization']), 2),
+                'relocation_count': int(custom_unloading_result['relocation_count'])
             },
             'packed_items': details,
             'loading_sequence': _fnGenerateLoadingSequence(final_packer.bins[0].items)['event_log'],
-            'unloading_sequence': final_metrics['unloading_sequence'],
+            'unloading_sequence': custom_unloading_result['event_log'],
             'vehicle_info': {
                 **dict_vehicleInfo,
                 'num_packages_loaded': int(num_loaded),
@@ -269,7 +278,11 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         return _create_error_response(str(e), strAlgorithmName, fltCapacityCm3)
 
 def _fnPostProcessPacking(objBin):
-    """Post-processes the packing to ensure all items are properly settled due to gravity."""
+    """
+    Post-processes the packing to ensure all items are properly settled due to gravity.
+    
+    This function simulates gravity by moving items down until they have support.
+    """
     items = objBin.items
     iters = 15
     moved_total = 0
@@ -309,7 +322,15 @@ def _fnPostProcessPacking(objBin):
             break
 
 def _fnGenerateLoadingSequence(items):
-    """Generates a chronological loading sequence from the final packing layout."""
+    """
+    Generates a chronological loading sequence from the final packing layout.
+    
+    Args:
+        items: List of packed items from the bin
+    
+    Returns:
+        dict: Event log with loading sequence
+    """
     if not items:
         return {'event_log': []}
     

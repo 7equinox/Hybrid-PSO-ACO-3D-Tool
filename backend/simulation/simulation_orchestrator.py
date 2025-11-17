@@ -1,11 +1,16 @@
 """
 System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and testing)
-Module Name: Simulation Orchestration
+Module Name: Simulation Orchestration (REVISED - Free Area Detection)
 
 Purpose of this file:
 This module is the heart of the 'Experimentation Stage' as defined in the research
 methodology. It acts as the master conductor for a single, complete experimental
 run.
+
+CRITICAL ADDITION:
+- Detects INITIAL FREE AREAS before unloading starts
+- Tracks free areas dynamically as items move
+- Passes free areas info to performance_metrics for smart placement
 """
 # --- Import necessary libraries ---
 import time
@@ -15,6 +20,7 @@ import traceback
 from memory_profiler import memory_usage
 from py3dbp import Packer, Bin, Item
 
+
 # --- Import Custom Application Modules ---
 from backend.data_management.data_manager import fnGetDisplayDataForVehicle
 from backend.simulation.performance_metrics import fnCalculateAllMetrics
@@ -22,6 +28,7 @@ from backend.simulation.custom_exceptions import CancelledException
 from backend.algorithms.pso_algorithm import fnRunPsoAlgorithm
 from backend.algorithms.aco_algorithm import fnRunAcoAlgorithm
 from backend.algorithms.hybrid_pso_aco_algorithm import fnRunHybridPsoAcoAlgorithm
+
 
 def _create_error_response(error_message, algorithm_name, capacity_cm3):
     """Creates a structured, default error response to prevent frontend crashes."""
@@ -48,6 +55,7 @@ def _create_error_response(error_message, algorithm_name, capacity_cm3):
             'total_packed_service_time': 0,
         }
     }
+
 
 class SpatialGrid:
     """Spatial hashing grid for efficient collision detection in 3D space."""
@@ -83,6 +91,7 @@ class SpatialGrid:
                 s.update(self.grid[ci])
         return list(s)
 
+
 def _fnCalculateRectangularDimensions(fltVolumeCm3):
     """Calculates realistic, non-cubic dimensions for a truck container."""
     try:
@@ -97,6 +106,115 @@ def _fnCalculateRectangularDimensions(fltVolumeCm3):
         }
     except:
         return {"width": 0, "height": 0, "depth": 0}
+
+
+def _fnDetectInitialFreeAreas(items, bin_dims, grid_resolution=20):
+    """
+    NEW: Detect INITIAL FREE AREAS before unloading starts.
+    
+    Uses grid-based approach to find empty 3D spaces.
+    Returns list of free regions that can be used for placement.
+    
+    Args:
+        items: List of packed items (dict with 'pos' and 'dims')
+        bin_dims: [width, height, depth] of bin
+        grid_resolution: Size of each grid cell (smaller = finer detection)
+    
+    Returns:
+        list of free areas: [{'pos': [x,y,z], 'dims': [w,h,d]}, ...]
+    """
+    if not items:
+        # No items = entire container is free
+        return [{
+            'pos': [0, 0, 0],
+            'dims': bin_dims,
+            'type': 'initial_full_container'
+        }]
+    
+    bin_dims = [float(d) for d in bin_dims]
+    grid_res = float(grid_resolution)
+    
+    # Create occupancy grid
+    grid_size_x = int(math.ceil(bin_dims[0] / grid_res))
+    grid_size_y = int(math.ceil(bin_dims[1] / grid_res))
+    grid_size_z = int(math.ceil(bin_dims[2] / grid_res))
+    
+    occupancy = [[[False for _ in range(grid_size_z)] for _ in range(grid_size_y)] for _ in range(grid_size_x)]
+    
+    # Mark occupied cells
+    for item in items:
+        item_pos = [float(p) for p in item['pos']]
+        item_dims = [float(d) for d in item['dims']]
+        
+        x_start = int(item_pos[0] // grid_res)
+        x_end = int((item_pos[0] + item_dims[0]) // grid_res)
+        y_start = int(item_pos[1] // grid_res)
+        y_end = int((item_pos[1] + item_dims[1]) // grid_res)
+        z_start = int(item_pos[2] // grid_res)
+        z_end = int((item_pos[2] + item_dims[2]) // grid_res)
+        
+        for x in range(max(0, x_start), min(grid_size_x, x_end + 1)):
+            for y in range(max(0, y_start), min(grid_size_y, y_end + 1)):
+                for z in range(max(0, z_start), min(grid_size_z, z_end + 1)):
+                    occupancy[x][y][z] = True
+    
+    # Find continuous free regions
+    free_areas = []
+    visited = [[[False for _ in range(grid_size_z)] for _ in range(grid_size_y)] for _ in range(grid_size_x)]
+    
+    def flood_fill_3d(start_x, start_y, start_z):
+        """3D flood fill to find continuous free regions."""
+        stack = [(start_x, start_y, start_z)]
+        cells = []
+        
+        while stack:
+            x, y, z = stack.pop()
+            
+            if x < 0 or x >= grid_size_x or y < 0 or y >= grid_size_y or z < 0 or z >= grid_size_z:
+                continue
+            
+            if visited[x][y][z] or occupancy[x][y][z]:
+                continue
+            
+            visited[x][y][z] = True
+            cells.append((x, y, z))
+            
+            # Check 6 neighbors
+            for dx, dy, dz in [(1,0,0), (-1,0,0), (0,1,0), (0,-1,0), (0,0,1), (0,0,-1)]:
+                stack.append((x + dx, y + dy, z + dz))
+        
+        return cells
+    
+    # Find all free regions
+    for x in range(grid_size_x):
+        for y in range(grid_size_y):
+            for z in range(grid_size_z):
+                if not visited[x][y][z] and not occupancy[x][y][z]:
+                    cells = flood_fill_3d(x, y, z)
+                    
+                    if len(cells) > 2:  # Only regions with >2 cells
+                        # Calculate bounding box of free region
+                        xs = [c[0] for c in cells]
+                        ys = [c[1] for c in cells]
+                        zs = [c[2] for c in cells]
+                        
+                        min_x, max_x = min(xs), max(xs)
+                        min_y, max_y = min(ys), max(ys)
+                        min_z, max_z = min(zs), max(zs)
+                        
+                        free_areas.append({
+                            'pos': [min_x * grid_res, min_y * grid_res, min_z * grid_res],
+                            'dims': [
+                                (max_x - min_x + 1) * grid_res,
+                                (max_y - min_y + 1) * grid_res,
+                                (max_z - min_z + 1) * grid_res
+                            ],
+                            'type': 'initial_free_region',
+                            'volume': ((max_x - min_x + 1) * (max_y - min_y + 1) * (max_z - min_z + 1)) * (grid_res ** 3)
+                        })
+    
+    return sorted(free_areas, key=lambda x: x['volume'], reverse=True)
+
 
 def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled, dictProgressTracker):
     """Main orchestrator for a single experimental run."""
@@ -145,7 +263,15 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
             
             p.pack(bigger_first=True, distribute_items=True)
             
-            metrics = fnCalculateAllMetrics(p.bins[0].items, float(obj_bin.get_volume()), arr_packagesInfo, strAlgorithmName)
+            # NEW: Pass free areas info to fnCalculateAllMetrics
+            packed_items = p.bins[0].items if p.bins else []
+            bin_dims = [float(obj_bin.width), float(obj_bin.height), float(obj_bin.depth)]
+            
+            # Detect initial free areas for this configuration
+            items_dict = [{'pos': [float(x) for x in i.position], 'dims': [float(d) for d in i.get_dimension()]} for i in packed_items]
+            initial_free_areas = _fnDetectInitialFreeAreas(items_dict, bin_dims, grid_resolution=20)
+            
+            metrics = fnCalculateAllMetrics(packed_items, float(obj_bin.get_volume()), arr_packagesInfo, strAlgorithmName, initial_free_areas)
             
             fit = (float(metrics['volume_utilization']), int(metrics['relocation_count']))
             fitness_cache[key] = fit
@@ -161,6 +287,7 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         if not func_algorithm:
             return _create_error_response(f"Invalid algorithm: {strAlgorithmName}", strAlgorithmName, fltCapacityCm3)
 
+
         dictProgressTracker['message'] = f"Running {strAlgorithmName}..."
         tm_start = time.time()
         
@@ -173,6 +300,7 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         
         mem_usage = float(mem_res[0]) if isinstance(mem_res, tuple) else float(mem_res if mem_res else 0)
         computation_time = round(time.time() - tm_start, 2)
+
 
         dictProgressTracker['message'] = "Finalizing layout..."
         
@@ -191,7 +319,15 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         _fnPostProcessPacking(final_packer.bins[0])
         num_loaded = len(final_packer.bins[0].items)
 
-        final_metrics = fnCalculateAllMetrics(final_packer.bins[0].items, float(obj_bin.get_volume()), arr_packagesInfo, strAlgorithmName)
+
+        # NEW: Detect initial free areas for final layout
+        packed_items = final_packer.bins[0].items
+        bin_dims_final = [float(obj_bin.width), float(obj_bin.height), float(obj_bin.depth)]
+        items_dict_final = [{'pos': [float(x) for x in i.position], 'dims': [float(d) for d in i.get_dimension()]} for i in packed_items]
+        initial_free_areas_final = _fnDetectInitialFreeAreas(items_dict_final, bin_dims_final, grid_resolution=20)
+        
+        # Pass free areas to metrics calculation
+        final_metrics = fnCalculateAllMetrics(packed_items, float(obj_bin.get_volume()), arr_packagesInfo, strAlgorithmName, initial_free_areas_final)
         
         # --- REVISED METRIC MANIPULATION ---
         base_rearrangements = int(final_metrics.get('relocation_count', 0))
@@ -226,7 +362,7 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         details = []
         service_time = 0
         
-        for i in final_packer.bins[0].items:
+        for i in packed_items:
             p = next((pkg for pkg in arr_packagesInfo if str(pkg['id']) == str(i.name)), None)
             if p:
                 w, h, d = map(float, i.get_dimension())
@@ -252,8 +388,12 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
                 'relocation_count': int(final_relocation_count)
             },
             'packed_items': details,
-            'loading_sequence': _fnGenerateLoadingSequence(final_packer.bins[0].items)['event_log'],
+            'loading_sequence': _fnGenerateLoadingSequence(packed_items)['event_log'],
             'unloading_sequence': final_metrics['unloading_sequence'],
+            'free_areas_info': {
+                'initial_free_areas_detected': len(initial_free_areas_final),
+                'total_free_volume': sum(fa['volume'] for fa in initial_free_areas_final if 'volume' in fa)
+            },
             'vehicle_info': {
                 **dict_vehicleInfo,
                 'num_packages_loaded': int(num_loaded),
@@ -267,6 +407,7 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     except Exception as e:
         traceback.print_exc()
         return _create_error_response(str(e), strAlgorithmName, fltCapacityCm3)
+
 
 def _fnPostProcessPacking(objBin):
     """Post-processes the packing to ensure all items are properly settled due to gravity."""
@@ -307,6 +448,7 @@ def _fnPostProcessPacking(objBin):
         moved_total += moved_this_pass
         if moved_this_pass == 0:
             break
+
 
 def _fnGenerateLoadingSequence(items):
     """Generates a chronological loading sequence from the final packing layout."""

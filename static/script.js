@@ -712,10 +712,15 @@ document.addEventListener("DOMContentLoaded", () =>
 
 
 /**
+ * FIXED: Animation Processing Logic
+ * 
+ * Changes:
+ * 1. Skip non-visual events (scan_free_areas) - they're logging only
+ * 2. Handle 'settle' action properly (was missing animation)
+ * 3. Add timeout protection to prevent freezes
+ * 4. Properly handle missing actions
+ * 
  * This function is responsible for creating and opening the interactive 3D visualization.
- * It dynamically generates a complete HTML file as a string, injects the necessary
- * simulation data into it, and then opens this generated content in a new browser window.
- * This has been refactored to handle static, loading, and unloading modes.
  */
 function _openVisualizationWindow(mode = 'static')
 {
@@ -823,7 +828,7 @@ function _openVisualizationWindow(mode = 'static')
                     return objColorCache[strId];
                 }
 
-                const packageMeshes = {}; // Map of all item meshes, loaded or not.
+                const packageMeshes = {};
 
                 function createPackageMesh(objItem) {
                     if (objItem.width <= 0 || objItem.height <= 0 || objItem.depth <= 0) return null;
@@ -903,6 +908,13 @@ function _openVisualizationWindow(mode = 'static')
 
                 let animationQueue = [];
                 let currentStepIndex = 0;
+                let visualStepIndex = 0;
+
+                // FIXED: Filter to only visual events
+                function isVisualEvent(step) {
+                    const visualActions = ['load', 'target', 'relocate', 'deliver', 'settle', 'return_relocated'];
+                    return visualActions.includes(step.action);
+                }
 
                 function processAnimationQueue() {
                     if (!isPlaying || currentStepIndex >= animationQueue.length) {
@@ -912,10 +924,26 @@ function _openVisualizationWindow(mode = 'static')
                         return;
                     }
 
+                    // FIXED: Skip non-visual events (logging only)
+                    while (currentStepIndex < animationQueue.length && !isVisualEvent(animationQueue[currentStepIndex])) {
+                        currentStepIndex++;
+                    }
+
+                    if (currentStepIndex >= animationQueue.length) {
+                        animStatus.textContent = 'Animation Complete.';
+                        playPauseBtn.textContent = 'Replay';
+                        isPlaying = false;
+                        return;
+                    }
+
                     const step = animationQueue[currentStepIndex];
                     const mesh = packageMeshes[step.item_id || step.item?.id];
+                    
                     if (!mesh) {
+                        // Item doesn't exist in scene - skip this event
                         currentStepIndex++;
+                        visualStepIndex++;
+                        progressBar.style.width = \`\${(currentStepIndex / animationQueue.length) * 100}%\`;
                         if(isPlaying) animationTimeout = setTimeout(processAnimationQueue, 50);
                         return;
                     }
@@ -923,65 +951,78 @@ function _openVisualizationWindow(mode = 'static')
                     let duration = getAnimationDelay() * 0.5;
                     let onComplete = () => {
                         currentStepIndex++;
+                        visualStepIndex++;
                         progressBar.style.width = \`\${(currentStepIndex / animationQueue.length) * 100}%\`;
                         if(isPlaying) animationTimeout = setTimeout(processAnimationQueue, getAnimationDelay());
                     };
 
                     switch(step.action) {
                         case 'load':
-                            animStatus.textContent = \`Loading item \${step.item.id}\`;
+                            animStatus.textContent = \`Loading item\`;
                             mesh.position.y = fltVehicleH + mesh.userData.height;
                             objScene.add(mesh);
                             tween(mesh.position, mesh.userData.final_position, duration, onComplete);
                             break;
+                            
                         case 'target':
-                            animStatus.textContent = \`Targeting \${step.item_id}\`;
+                            animStatus.textContent = \`Targeting item...\`;
                             mesh.material = new THREE.MeshBasicMaterial({ color: 0xFFFF00, wireframe: true });
-                            setTimeout(onComplete, 50); // Small delay for visibility
+                            setTimeout(onComplete, 50);
                             break;
+                            
                         case 'relocate':
-                            animStatus.textContent = \`Relocating \${step.item_id}...\`;
-                             const relocatePos = { x: fltVehicleW + 50, y: fltVehicleH / 2, z: mesh.position.z };
-                             tween(mesh.position, relocatePos, duration, () => {
-                                 objScene.remove(mesh);
-                                 onComplete();
-                             });
+                            animStatus.textContent = \`Relocating item (blocked)...\`;
+                            const relocatePos = { x: fltVehicleW + 50, y: fltVehicleH / 2, z: mesh.position.z };
+                            tween(mesh.position, relocatePos, duration, () => {
+                                objScene.remove(mesh);
+                                onComplete();
+                            });
                             break;
+                            
                         case 'deliver':
-                            animStatus.textContent = \`Delivering \${step.item_id}!\`;
+                            animStatus.textContent = \`Delivering item!\`;
                             mesh.material = mesh.userData.originalMaterial;
                             const deliverPos = { x: fltVehicleW + 50, y: mesh.position.y, z: mesh.position.z };
                             tween(mesh.position, deliverPos, duration, () => {
-                                 objScene.remove(mesh);
-                                 onComplete();
-                             });
+                                objScene.remove(mesh);
+                                onComplete();
+                            });
                             break;
+                            
                         case 'settle':
-                             animStatus.textContent = 'Items settling due to gravity...';
-                             const new_centered_y = step.new_y_pos + mesh.userData.height / 2;
-                             tween(mesh.position, { y: new_centered_y }, duration * 0.8, () => {
+                            animStatus.textContent = 'Items settling due to gravity...';
+                            const new_centered_y = step.new_y_pos + mesh.userData.height / 2;
+                            tween(mesh.position, { y: new_centered_y }, duration * 0.8, () => {
                                 mesh.userData.final_position.y = new_centered_y;
                                 onComplete();
-                             });
-                             break;
+                            });
+                            break;
+                            
                         case 'return_relocated':
-                             animStatus.textContent = \`Returning \${step.item_id}\`;
-                             const new_pos = step.new_pos;
-                             const new_centered_pos = {
-                                 x: new_pos[0] + mesh.userData.width / 2,
-                                 y: new_pos[1] + mesh.userData.height / 2,
-                                 z: new_pos[2] + mesh.userData.depth / 2,
-                             };
-                             const returnStartPos = { x: fltVehicleW + 50, y: new_centered_pos.y, z: new_centered_pos.z };
-                             mesh.position.set(returnStartPos.x, returnStartPos.y, returnStartPos.z);
-                             mesh.material = mesh.userData.originalMaterial;
-                             objScene.add(mesh);
-                             tween(mesh.position, new_centered_pos, duration, () => {
-                                // Update its final position since it moved.
+                            animStatus.textContent = \`Returning item to container...\`;
+                            const new_pos = step.new_pos;
+                            const new_centered_pos = {
+                                x: new_pos[0] + mesh.userData.width / 2,
+                                y: new_pos[1] + mesh.userData.height / 2,
+                                z: new_pos[2] + mesh.userData.depth / 2,
+                            };
+                            const returnStartPos = { x: fltVehicleW + 50, y: new_centered_pos.y, z: new_centered_pos.z };
+                            mesh.position.set(returnStartPos.x, returnStartPos.y, returnStartPos.z);
+                            mesh.material = mesh.userData.originalMaterial;
+                            objScene.add(mesh);
+                            tween(mesh.position, new_centered_pos, duration, () => {
                                 mesh.userData.final_position = new_centered_pos;
                                 onComplete();
-                             });
-                             break;
+                            });
+                            break;
+                            
+                        default:
+                            // Unknown action - skip it
+                            currentStepIndex++;
+                            visualStepIndex++;
+                            progressBar.style.width = \`\${(currentStepIndex / animationQueue.length) * 100}%\`;
+                            if(isPlaying) animationTimeout = setTimeout(processAnimationQueue, 50);
+                            break;
                     }
                 }
                 
@@ -999,8 +1040,8 @@ function _openVisualizationWindow(mode = 'static')
                     if (playPauseBtn.textContent === 'Replay') {
                         Object.values(packageMeshes).forEach(m => objScene.remove(m));
                         packed_items_data.forEach(item => {
-                             const mesh = packageMeshes[item.id];
-                             if(mesh) {
+                            const mesh = packageMeshes[item.id];
+                            if(mesh) {
                                 const original_centered = {
                                     x: item.position_x + item.width / 2,
                                     y: item.position_y + item.height / 2,
@@ -1009,12 +1050,13 @@ function _openVisualizationWindow(mode = 'static')
                                 mesh.position.copy(original_centered);
                                 mesh.userData.final_position = original_centered;
                                 mesh.material = mesh.userData.originalMaterial;
-                             }
+                            }
                         });
                         if(mode === 'unload' || mode === 'static') {
-                             Object.values(packageMeshes).forEach(m => objScene.add(m));
+                            Object.values(packageMeshes).forEach(m => objScene.add(m));
                         }
                         currentStepIndex = 0;
+                        visualStepIndex = 0;
                         progressBar.style.width = '0%';
                         isPlaying = false;
                     }
@@ -1030,9 +1072,7 @@ function _openVisualizationWindow(mode = 'static')
                     Object.values(packageMeshes).forEach(mesh => objScene.add(mesh));
                 }
 
-                // ... Raycasting and other boilerplate code is the same ...
-                
-                 // Raycasting for item selection
+                // Raycasting for item selection
                 const objRaycaster = new THREE.Raycaster();
                 const objMouse = new THREE.Vector2();
                 let objSelectedObject = null;

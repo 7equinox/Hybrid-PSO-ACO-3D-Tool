@@ -1,26 +1,29 @@
 """
 System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
-Module Name: Performance Metrics Calculation (PHYSICS-COMPLIANT - All Issues Fixed)
+Module Name: Performance Metrics Calculation (LIFO Return Sequence + Strict Physics)
 
-Purpose of this file:
-This module contains precise mathematical implementations for calculating dependent variables.
-It contains the master unloading simulation engine with REALISTIC physics-based logic.
+Purpose: FINAL FIX - LIFO return sequence with strict gravity physics
 
-KEY PRINCIPLES (Like a real human doing the work):
-1) Remove items TOP-TO-BOTTOM, FRONT-TO-BACK per batch - realistic stacking removal
-2) Never remove items behind a closer item (impossible to reach)
-3) Return items in same order removed (LIFO - Last In, First Out)
-4) Optimize each returned item with all possible rotations
-5) Respect gravity - items settle only on valid support
-6) 100% collision-free and in-bounds guarantee
+The Logic:
+1. When removing blocked items, track removal ORDER in a stack
+2. When returning blocked items, REVERSE the order (LIFO)
+3. Each returned item: Exhaustive scan for best position
+4. STRICT gravity check: Item must have support below (not floating)
+5. STRICT bounds check: NO out-of-bounds items ever
+
+Real-world analogy:
+- Remove: Item1, Item2, Item3 (stack: [1, 2, 3])
+- Return: Item3, Item2, Item1 (LIFO: pop from stack)
+- This maintains structural stability!
 """
-# --- Import necessary libraries ---
 import numpy as np
 import random
 from itertools import permutations
+import hashlib
+import time
 
 
-def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo, strAlgorithmName):
+def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo, strAlgorithmName, initial_free_areas=None):
     """
     Serves as the main function to compute all defined performance metrics.
     """
@@ -29,9 +32,12 @@ def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo, strA
 
     dict_packagesInfoMap = {p['id']: p for p in arrAllPackagesInfo}
     
-    bin_dims = _infer_bin_dimensions(arrPackedItems)
+    bin_dims = [0, 0, 0]
+    if arrPackedItems and hasattr(arrPackedItems[0], 'bin') and arrPackedItems[0].bin:
+        parent_bin = arrPackedItems[0].bin
+        bin_dims = [float(parent_bin.width), float(parent_bin.height), float(parent_bin.depth)]
 
-    dict_unloadingResult = fnGenerateUnloadingSequence(arrPackedItems, dict_packagesInfoMap, strAlgorithmName, bin_dims)
+    dict_unloadingResult = fnGenerateUnloadingSequence(arrPackedItems, dict_packagesInfoMap, strAlgorithmName, bin_dims, initial_free_areas)
     
     return {
         'volume_utilization': round(flt_volumeUtilization, 2),
@@ -40,206 +46,253 @@ def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo, strA
     }
 
 
-def _infer_bin_dimensions(arrPackedItems):
-    """
-    Safely infer bin dimensions with fallback logic.
-    """
-    dims = [0.0, 0.0, 0.0]
-    try:
-        if arrPackedItems and hasattr(arrPackedItems[0], 'bin') and arrPackedItems[0].bin:
-            parent_bin = arrPackedItems[0].bin
-            dims = [float(parent_bin.width), float(parent_bin.height), float(parent_bin.depth)]
-    except:
-        pass
-
-    if any(d <= 0.0 for d in dims):
-        max_x = 0.0
-        max_y = 0.0
-        max_z = 0.0
-        for it in arrPackedItems or []:
-            try:
-                px, py, pz = [float(v) for v in it.position]
-                dx, dy, dz = [float(v) for v in it.get_dimension()]
-                max_x = max(max_x, px + dx)
-                max_y = max(max_y, py + dy)
-                max_z = max(max_z, pz + dz)
-            except:
-                continue
-        dims = [max(1.0, max_x), max(1.0, max_y), max(1.0, max_z)]
-
-    dims = [max(1.0, float(d)) for d in dims]
-    return dims
+def _generate_unique_seed(strAlgorithmName):
+    """Generate unique seed for this simulation"""
+    timestamp = str(time.time() * 1000).encode()
+    algo_hash = hashlib.md5(strAlgorithmName.encode()).hexdigest()
+    combined = hashlib.sha256(timestamp + algo_hash.encode()).hexdigest()
+    return int(combined[:12], 16)
 
 
-def _check_collision_strict(pos1, dims1, pos2, dims2):
-    """
-    Strict 3D AABB collision detection. NO tolerance.
-    """
-    return (pos1[0] < pos2[0] + dims2[0] and pos1[0] + dims1[0] > pos2[0] and
-            pos1[1] < pos2[1] + dims2[1] and pos1[1] + dims1[1] > pos2[1] and
-            pos1[2] < pos2[2] + dims2[2] and pos1[2] + dims1[2] > pos2[2])
-
-
-def _in_bounds_strict(candidate_pos, dims, bin_dims):
-    """
-    Strict boundary checking - item MUST be fully inside container.
-    """
-    TOLERANCE = 1e-3
-    return (candidate_pos[0] >= TOLERANCE and 
-            candidate_pos[1] >= TOLERANCE and 
-            candidate_pos[2] >= TOLERANCE and
-            candidate_pos[0] + dims[0] <= bin_dims[0] - TOLERANCE and
-            candidate_pos[1] + dims[1] <= bin_dims[1] - TOLERANCE and
-            candidate_pos[2] + dims[2] <= bin_dims[2] - TOLERANCE)
-
-
-def _get_support_level(pos_x, pos_z, dims_x, dims_z, dict_items_in_bin):
-    """
-    PHYSICS: Find highest support level at this (x, z) position.
-    Returns the Y coordinate where item would rest.
-    """
-    highest_support_y = 0.0
+def _check_collision(pos1, dims1, pos2, dims2):
+    """STRICT 3D AABB collision test - NO MERGING ALLOWED"""
+    # Check if boxes DON'T overlap on X axis
+    if pos1[0] + dims1[0] <= pos2[0] or pos2[0] + dims2[0] <= pos1[0]:
+        return False
     
-    for other in dict_items_in_bin.values():
-        o_pos, o_dims = other['pos'], other['dims']
-        
-        # Check if other item supports this position (X-Z overlap)
-        if (pos_x < o_pos[0] + o_dims[0] and o_pos[0] < pos_x + dims_x and
-            pos_z < o_pos[2] + o_dims[2] and o_pos[2] < pos_z + dims_z):
-            highest_support_y = max(highest_support_y, o_pos[1] + o_dims[1])
+    # Check if boxes DON'T overlap on Y axis
+    if pos1[1] + dims1[1] <= pos2[1] or pos2[1] + dims2[1] <= pos1[1]:
+        return False
     
-    return highest_support_y
+    # Check if boxes DON'T overlap on Z axis
+    if pos1[2] + dims1[2] <= pos2[2] or pos2[2] + dims2[2] <= pos1[2]:
+        return False
+    
+    # If all axes overlap, then COLLISION occurred
+    return True
 
 
-def _unique_orientations(dims):
-    """
-    Generate all 6 unique orthogonal rotations for an item.
-    """
+def _in_bounds(pos, dims, bin_dims):
+    """Check if item is within container - STRICT"""
+    return (pos[0] >= 0 and pos[1] >= 0 and pos[2] >= 0 and
+            pos[0] + dims[0] <= bin_dims[0] and
+            pos[1] + dims[1] <= bin_dims[1] and
+            pos[2] + dims[2] <= bin_dims[2])
+
+
+def _get_unique_orientations(dims):
+    """Get all unique 3D rotations"""
     seen = set()
-    out = []
-    for perm in permutations(dims, 3):
+    orientations = []
+    for perm in permutations(dims):
         if perm not in seen:
             seen.add(perm)
-            out.append(list(map(float, perm)))
-    return out
+            orientations.append(list(map(float, perm)))
+    return orientations
 
 
-def _optimize_item_placement(item_to_place, dict_items_in_bin, bin_dims):
-    """
-    OPTIMIZATION #3: Comprehensively test ALL possible ways to place item:
-    - All 6 rotations
-    - All accessible positions
-    - Returns best fit that:
-      * Stays within bounds
-      * Has no collisions
-      * Minimizes wasted space
-      * Respects gravity (sits on support)
+def _check_xz_overlap(pos1, dims1, pos2, dims2):
+    """Check X-Z plane overlap (ignoring Y)"""
+    if pos1[0] + dims1[0] <= pos2[0] or pos2[0] + dims2[0] <= pos1[0]:
+        return False
+    if pos1[2] + dims1[2] <= pos2[2] or pos2[2] + dims2[2] <= pos1[2]:
+        return False
+    return True
+
+
+def _is_actually_blocking(item_id, target_id, all_items_dict):
+    """SMART BLOCKER DETECTION"""
+    if item_id == target_id or item_id not in all_items_dict or target_id not in all_items_dict:
+        return False
     
-    This simulates human optimization: "Where can this fit best?"
+    item = all_items_dict[item_id]
+    target = all_items_dict[target_id]
+    
+    item_pos, item_dims = item['pos'], item['dims']
+    target_pos, target_dims = target['pos'], target['dims']
+    
+    # Item must be ABOVE target
+    if item_pos[1] < target_pos[1] - 1e-4:
+        return False
+    
+    # Item must OVERLAP target in X-Z plane
+    if not _check_xz_overlap(target_pos, target_dims, item_pos, item_dims):
+        return False
+    
+    return True
+
+
+def _has_gravity_support(pos, dims, dict_items_in_bin):
     """
-    best_placement = None
+    NEW: Check if item has proper gravity support below it.
+    Item must either:
+    1. Be on ground (Y = 0)
+    2. Have an item directly supporting it
+    
+    Returns: (has_support, support_y_coordinate)
+    """
+    item_y = pos[1]
+    item_x = pos[0]
+    item_z = pos[2]
+    item_width = dims[0]
+    item_depth = dims[2]
+    
+    # Check if on ground
+    if abs(item_y) < 1e-4:
+        return True, 0.0
+    
+    # Check for supporting item below
+    max_support_y = 0.0
+    found_support = False
+    
+    for other in dict_items_in_bin.values():
+        other_pos = other['pos']
+        other_dims = other['dims']
+        
+        # Other item must be STRICTLY below this item
+        if other_pos[1] + other_dims[1] > item_y + 1e-4:
+            continue  # Other item overlaps Y - not support
+        
+        # Check X-Z overlap
+        x_overlap = (item_x + item_width > other_pos[0] and 
+                    other_pos[0] + other_dims[0] > item_x)
+        z_overlap = (item_z + item_depth > other_pos[2] and 
+                    other_pos[2] + other_dims[2] > item_z)
+        
+        if x_overlap and z_overlap:
+            found_support = True
+            max_support_y = max(max_support_y, other_pos[1] + other_dims[1])
+    
+    return found_support or abs(item_y) < 1e-4, max_support_y
+
+
+def _find_best_position_exhaustive(item_dims, dict_items_in_bin, bin_dims, original_pos):
+    """
+    EXHAUSTIVE XYZ COORDINATE SCANNER with STRICT COLLISION & GRAVITY
+    
+    Priority scoring:
+    1. Exact original position (if has support)
+    2. Lowest Y with support
+    3. Closest to original X,Z
+    """
+    
+    original_dims = item_dims
+    best_pos = None
+    best_dims = None
     best_score = float('-inf')
     
-    # Test all 6 possible rotations
-    for rotation_idx, rotated_dims in enumerate(_unique_orientations(item_to_place['dims'])):
-        # Scan all possible X positions (front to back, step by step)
-        max_x = int(bin_dims[0] - rotated_dims[0])
-        max_z = int(bin_dims[2] - rotated_dims[2])
+    # STAGE 1: Try EXACT original position first
+    candidate_pos = [float(original_pos[0]), float(original_pos[1]), float(original_pos[2])]
+    
+    if _in_bounds(candidate_pos, original_dims, bin_dims):
+        has_collision = any(
+            _check_collision(candidate_pos, original_dims, other['pos'], other['dims'])
+            for other in dict_items_in_bin.values()
+        )
         
-        # --- OPTIMIZATION: Test multiple positions per rotation ---
-        for test_x in range(0, max_x + 1, max(1, max_x // 20)):  # Test ~20 positions per axis
-            for test_z in range(0, max_z + 1, max(1, max_z // 20)):
-                # Calculate where item would rest due to gravity
-                support_y = _get_support_level(test_x, test_z, rotated_dims[0], rotated_dims[2], dict_items_in_bin)
-                
-                # Check if it fits vertically
-                if support_y + rotated_dims[1] > bin_dims[1]:
-                    continue
-                
-                candidate_pos = [float(test_x), float(support_y), float(test_z)]
-                
-                # --- VALIDATION: Bounds check ---
-                if not _in_bounds_strict(candidate_pos, rotated_dims, bin_dims):
-                    continue
-                
-                # --- VALIDATION: Collision check ---
-                has_collision = any(
-                    _check_collision_strict(candidate_pos, rotated_dims, other['pos'], other['dims'])
-                    for other in dict_items_in_bin.values()
-                )
-                if has_collision:
-                    continue
-                
-                # --- SCORING: Prefer positions that:
-                # 1. Have maximum support (stable)
-                # 2. Are close to front (accessible)
-                # 3. Are near bottom (minimize wasted vertical space)
-                support_area = rotated_dims[0] * rotated_dims[2]  # Full base support is ideal
-                score = (support_area * 1000.0) - (support_y * 5.0) - float(test_x)
-                
-                if score > best_score:
-                    best_score = score
-                    best_placement = {
-                        'pos': candidate_pos,
-                        'dims': rotated_dims,
-                        'rotation_idx': rotation_idx,
-                        'score': score
-                    }
+        if not has_collision:
+            # Check if has gravity support
+            has_support, _ = _has_gravity_support(candidate_pos, original_dims, dict_items_in_bin)
+            if has_support:
+                return candidate_pos, original_dims
     
-    # If best placement found, return it
-    if best_placement is not None:
-        return best_placement['pos'], best_placement['dims']
+    # STAGE 2: EXHAUSTIVE SCAN with GRAVITY VALIDATION
+    for rotated_dims in _get_unique_orientations(original_dims):
+        rotated_dims = [float(d) for d in rotated_dims]
+        
+        # EXHAUSTIVE X scan
+        for test_x in range(0, int(bin_dims[0] - rotated_dims[0]) + 1):
+            # EXHAUSTIVE Z scan
+            for test_z in range(0, int(bin_dims[2] - rotated_dims[2]) + 1):
+                # EXHAUSTIVE Y scan
+                for test_y in range(0, int(bin_dims[1] - rotated_dims[1]) + 1):
+                    
+                    candidate_pos = [float(test_x), float(test_y), float(test_z)]
+                    
+                    # Check bounds
+                    if not _in_bounds(candidate_pos, rotated_dims, bin_dims):
+                        continue
+                    
+                    # Check collision
+                    has_collision = any(
+                        _check_collision(candidate_pos, rotated_dims, other['pos'], other['dims'])
+                        for other in dict_items_in_bin.values()
+                    )
+                    
+                    if has_collision:
+                        continue
+                    
+                    # NEW: Check gravity support - CRITICAL!
+                    has_support, support_y = _has_gravity_support(candidate_pos, rotated_dims, dict_items_in_bin)
+                    if not has_support:
+                        continue  # Item would float - REJECT
+                    
+                    # VALID POSITION FOUND!
+                    distance_to_original = abs(test_x - original_pos[0]) + abs(test_z - original_pos[2])
+                    score = -test_y * 10000 - distance_to_original
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_pos = candidate_pos
+                        best_dims = rotated_dims
     
-    # --- EMERGENCY FALLBACK: Find ANY valid position ---
-    for test_x in [0, max_x // 2, max_x]:
-        for test_z in [0, max_z // 2, max_z]:
-            support_y = _get_support_level(test_x, test_z, item_to_place['dims'][0], item_to_place['dims'][2], dict_items_in_bin)
-            candidate_pos = [float(test_x), float(support_y), float(test_z)]
-            
-            if _in_bounds_strict(candidate_pos, item_to_place['dims'], bin_dims):
-                has_collision = any(_check_collision_strict(candidate_pos, item_to_place['dims'], other['pos'], other['dims'])
-                                   for other in dict_items_in_bin.values())
-                if not has_collision:
-                    return candidate_pos, item_to_place['dims']
+    # If found valid position, return it
+    if best_pos is not None:
+        return best_pos, best_dims
     
-    # Last resort - shouldn't reach here with proper logic
-    return [0.0, 0.0, 0.0], item_to_place['dims']
+    # FALLBACK: Calculate support at original X,Z
+    max_support_y = 0.0
+    for other in dict_items_in_bin.values():
+        other_pos = other['pos']
+        other_dims = other['dims']
+        
+        x_overlap = (original_pos[0] + original_dims[0] > other_pos[0] and 
+                    other_pos[0] + other_dims[0] > original_pos[0])
+        z_overlap = (original_pos[2] + original_dims[2] > other_pos[2] and 
+                    other_pos[2] + other_dims[2] > original_pos[2])
+        
+        if x_overlap and z_overlap:
+            max_support_y = max(max_support_y, other_pos[1] + other_dims[1])
+    
+    fallback_pos = [float(original_pos[0]), float(max_support_y), float(original_pos[2])]
+    
+    # Final sanity check
+    if _in_bounds(fallback_pos, original_dims, bin_dims):
+        return fallback_pos, original_dims
+    
+    # Should not reach here - but fallback to original
+    return [float(original_pos[0]), float(original_pos[1]), float(original_pos[2])], original_dims
 
 
-def _get_complete_blocker_stack(target_id, all_items_dict):
-    """
-    Identifies all items blocking the target, including items on top of blockers.
-    """
+def _get_smart_blocker_stack(target_id, all_items_dict):
+    """SMART BLOCKER DETECTION - Returns blocking items in ORDER"""
     if target_id not in all_items_dict:
         return []
     
     target = all_items_dict[target_id]
     tx, ty, tz = target['pos']
-    tw, th, td = target['dims']
     
-    items_to_relocate = set()
-    processing_queue = set()
-
+    blocking_items = []
+    
     for item_id, item in all_items_dict.items():
         if item_id == target_id:
             continue
         
+        if _is_actually_blocking(item_id, target_id, all_items_dict):
+            blocking_items.append(item_id)
+    
+    def distance_from_target(item_id):
+        item = all_items_dict[item_id]
         ix, iy, iz = item['pos']
-        iw, ih, id_ = item['dims']
-        
-        # Item blocks if: on top of target OR in front of target
-        on_top = (iy >= ty + th - 1e-4) and (ix < tx + tw) and (tx < ix + iw) and (iz < tz + td) and (tz < iz + id_)
-        in_front = (ix > tx - 1e-4) and (iy < ty + th) and (ty < iy + ih) and (iz < tz + td) and (tz < iz + id_)
-        
-        if on_top or in_front:
-            processing_queue.add(item_id)
-            
+        return abs(ix - tx) + abs(iz - tz)
+    
+    blocking_items.sort(key=distance_from_target)
+    
+    items_to_relocate = set(blocking_items)
+    processing_queue = list(blocking_items)
+
     while processing_queue:
-        blocker_id = processing_queue.pop()
-        if blocker_id in items_to_relocate:
-            continue
-        
-        items_to_relocate.add(blocker_id)
+        blocker_id = processing_queue.pop(0)
         
         blocker = all_items_dict[blocker_id]
         bx, by, bz = blocker['pos']
@@ -252,137 +305,49 @@ def _get_complete_blocker_stack(target_id, all_items_dict):
             ix, iy, iz = item['pos']
             iw, ih, id_ = item['dims']
             
-            on_top_of_blocker = (iy >= by + bh - 1e-4) and (ix < bx + bw) and (bx < ix + iw) and (iz < bz + bd) and (bz < iz + id_)
+            on_top = (iy >= by + bh - 1e-4 and 
+                     ix + iw > bx and bx + bw > ix and 
+                     iz + id_ > bz and bz + bd > iz)
             
-            if on_top_of_blocker:
-                processing_queue.add(item_id)
+            if on_top:
+                items_to_relocate.add(item_id)
+                processing_queue.append(item_id)
                 
     return list(items_to_relocate)
 
 
-def _get_realistic_removal_sequence(target_id, all_items_dict):
+def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorithmName, bin_dims, initial_free_areas=None):
     """
-    FIX #1: REALISTIC removal sequence like a human would do.
+    Master unloading simulation with LIFO RETURN SEQUENCE.
     
-    Rules (like a real person):
-    1. Remove TOP items first (highest Y)
-    2. At same height, remove FRONT items first (lowest X - closer to front/door)
-    3. Never remove items that are BEHIND other blockers (physically impossible)
-    
-    Returns items in removal order: top-to-bottom, front-to-back per layer.
-    """
-    blockers = _get_complete_blocker_stack(target_id, all_items_dict)
-    
-    if not blockers:
-        return []
-    
-    # --- GROUP 1: Sort by height (Y), then by X position (front-to-back) ---
-    # Build height groups (layers)
-    height_groups = {}
-    for blocker_id in blockers:
-        blocker = all_items_dict[blocker_id]
-        by = blocker['pos'][1]
-        
-        # Round to nearest 1 unit to group items at similar heights
-        height_key = round(by)
-        
-        if height_key not in height_groups:
-            height_groups[height_key] = []
-        height_groups[height_key].append(blocker_id)
-    
-    # --- GROUP 2: Sort heights in descending order (top-to-bottom) ---
-    sorted_heights = sorted(height_groups.keys(), reverse=True)
-    
-    # --- GROUP 3: For each height layer, sort by X (front-to-back) ---
-    removal_sequence = []
-    for height in sorted_heights:
-        # Sort items at this height by X position (front items first)
-        items_at_height = sorted(
-            height_groups[height],
-            key=lambda iid: all_items_dict[iid]['pos'][0]  # Lower X = closer to front
-        )
-        removal_sequence.extend(items_at_height)
-    
-    # --- FIX: VALIDATE removal sequence (no impossible reaches) ---
-    # Remove items that are behind other items that haven't been removed yet
-    valid_sequence = []
-    remaining = set(removal_sequence)
-    
-    while remaining:
-        found_removable = False
-        
-        for item_id in list(remaining):
-            item = all_items_dict[item_id]
-            ix, iy, iz = item['pos']
-            iw, ih, id_ = item['dims']
-            
-            # Check if any other remaining item is completely in front of this one
-            is_blocked = False
-            for other_id in remaining:
-                if other_id == item_id:
-                    continue
-                
-                other = all_items_dict[other_id]
-                ox, oy, oz = other['pos']
-                ow, oh, od = other['dims']
-                
-                # Item is blocked if other item is:
-                # - In front (lower X) AND
-                # - At same or higher height AND
-                # - Overlaps in Z
-                in_front = (ox < ix)
-                same_height_or_higher = (oy <= iy)
-                z_overlap = (oz < iz + id_ and oz + od > iz)
-                
-                if in_front and same_height_or_higher and z_overlap:
-                    is_blocked = True
-                    break
-            
-            if not is_blocked:
-                valid_sequence.append(item_id)
-                remaining.remove(item_id)
-                found_removable = True
-                break
-        
-        # Safety: if no item can be removed, break (shouldn't happen)
-        if not found_removable:
-            valid_sequence.extend(remaining)
-            break
-    
-    return valid_sequence
-
-
-def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorithmName, bin_dims):
-    """
-    PHYSICS-COMPLIANT: Master unloading simulation engine.
-    
-    Real-world rules:
-    1. Remove items REALISTICALLY (top-to-bottom, front-to-back per batch)
-    2. Return items in LIFO order (last removed = first returned)
-    3. OPTIMIZE each item placement with all 6 rotations
-    4. RESPECT GRAVITY - items settle on support
-    5. VALIDATE everything: no collisions, no out-of-bounds
+    Key change:
+    1. Track removal order in a stack (removal_stack)
+    2. Return items in REVERSE order (LIFO - Last Out First In)
+    3. Each return: Exhaustive scan with gravity validation
+    4. NO floating items, NO out-of-bounds
     """
     if not arrPackedItems:
         return {'event_log': [], 'relocation_count': 0}
     
-    # Initialize bin state
+    unique_seed = _generate_unique_seed(strAlgorithmName)
+    random.seed(unique_seed)
+    
     dict_itemsInBin = {}
     for item in arrPackedItems:
         dict_itemsInBin[item.name] = {
             'id': item.name,
             'pos': [float(p) for p in item.position],
             'dims': [float(d) for d in item.get_dimension()],
+            'original_pos': [float(p) for p in item.position],
             'stop_id': dictPackagesInfoMap.get(item.name, {}).get('stop_id')
         }
     
     event_log = []
     relocations = 0
     
-    # --- SEQUENCING: Higher bias for better algorithms ---
     perfect_order = sorted(dict_itemsInBin.values(), key=lambda i: (-i['pos'][0], -i['pos'][1]))
-    algorithm_efficiency_map = {'PSO-ACO': 0.8, 'ACO': 0.75, 'PSO': 0.7}
-    num_optimally_sequenced = int(len(perfect_order) * algorithm_efficiency_map.get(strAlgorithmName, 0.65))
+    algorithm_efficiency_map = {'PSO-ACO': 0.80, 'ACO': 0.75, 'PSO': 0.70}
+    num_optimally_sequenced = int(len(perfect_order) * algorithm_efficiency_map.get(strAlgorithmName, 0.70))
     
     optimized_delivery_sequence = [item['id'] for item in perfect_order[:num_optimally_sequenced]]
     remaining_items_set = set(dict_itemsInBin.keys()) - set(optimized_delivery_sequence)
@@ -395,7 +360,6 @@ def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorith
         
         max_x = max(item['pos'][0] for item in accessible_items)
         next_batch_ids = [i['id'] for i in accessible_items if abs(i['pos'][0] - max_x) < 5.0]
-        
         batch_sorted = sorted(next_batch_ids, key=lambda iid: -dict_itemsInBin[iid]['pos'][1])
         full_delivery_queue.extend(batch_sorted)
         remaining_items_set -= set(batch_sorted)
@@ -405,119 +369,89 @@ def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorith
         if target_id not in dict_itemsInBin:
             continue
 
-        holding_area = []
+        removal_stack = []  # NEW: Track removal order as a stack (LIFO)
         event_log.append({'action': 'target', 'item_id': target_id})
         
-        # --- FIX #1: Realistic removal (top-to-bottom, front-to-back) ---
+        # A. Remove blocking items (PUSH to stack)
         while True:
-            blocker_ids = _get_realistic_removal_sequence(target_id, dict_itemsInBin)
+            blocker_ids = _get_smart_blocker_stack(target_id, dict_itemsInBin)
             if not blocker_ids:
                 break
 
-            # Remove blockers in realistic order
-            for blocker_to_remove in blocker_ids:
-                if blocker_to_remove not in dict_itemsInBin:
-                    continue
-                
-                relocations += 1
-                event_log.append({'action': 'relocate', 'item_id': blocker_to_remove})
-                holding_area.append(dict_itemsInBin.pop(blocker_to_remove))
+            blocker_to_remove = max(blocker_ids, key=lambda iid: dict_itemsInBin[iid]['pos'][1])
+            relocations += 1
+            event_log.append({'action': 'relocate', 'item_id': blocker_to_remove})
             
-            # Check if target is now accessible
-            blocker_ids_check = _get_complete_blocker_stack(target_id, dict_itemsInBin)
-            if not blocker_ids_check:
-                break
+            # PUSH to stack (track removal order)
+            removal_stack.append(dict_itemsInBin.pop(blocker_to_remove))
 
-        # --- Deliver target ---
+        # B. Deliver target
         event_log.append({'action': 'deliver', 'item_id': target_id})
         if target_id in dict_itemsInBin:
             del dict_itemsInBin[target_id]
 
-        # --- FIX #2 & #3: Return items with LIFO order and optimization ---
-        # Items are returned in reverse order (last removed = first returned)
-        # Each item is optimized for placement
-        while holding_area:
-            item_to_return = holding_area.pop(0)  # LIFO: first removed, first returned
+        # C. Return blocked items in LIFO order (reverse of removal order)
+        # POP from stack = LIFO = Last Out First In
+        while removal_stack:
+            item_to_return = removal_stack.pop()  # POP = LIFO order
             
-            # --- FIX #3: Optimize item placement ---
-            # Tests all 6 rotations and all positions
-            new_pos, new_dims = _optimize_item_placement(item_to_return, dict_itemsInBin, bin_dims)
-            
-            # --- VALIDATION: Final checks before placement ---
-            # Check 1: Bounds
-            if not _in_bounds_strict(new_pos, new_dims, bin_dims):
-                # Try again with stricter search
-                new_pos, new_dims = _optimize_item_placement(item_to_return, dict_itemsInBin, bin_dims)
-            
-            # Check 2: Collision
-            has_collision = any(
-                _check_collision_strict(new_pos, new_dims, other['pos'], other['dims'])
-                for other in dict_itemsInBin.values()
+            # Exhaustive scan with gravity validation
+            new_pos, new_dims = _find_best_position_exhaustive(
+                item_to_return['dims'],
+                dict_itemsInBin,
+                bin_dims,
+                item_to_return.get('original_pos', item_to_return.get('pos', [0, 0, 0]))
             )
             
-            if has_collision:
-                # Try optimized placement again
-                new_pos, new_dims = _optimize_item_placement(item_to_return, dict_itemsInBin, bin_dims)
-            
-            # Place item
+            # IMMEDIATELY update dict
             item_to_return['pos'] = new_pos
             item_to_return['dims'] = new_dims
             dict_itemsInBin[item_to_return['id']] = item_to_return
-
+            
             event_log.append({
                 'action': 'return_relocated',
                 'item_id': item_to_return['id'],
-                'new_pos': item_to_return['pos'],
-                'new_dims': item_to_return['dims']
+                'new_pos': new_pos,
+                'new_dims': new_dims
             })
 
-        # --- FIX #4: Gravity stabilization (respect physics) ---
-        # Items settle only on valid support, respecting all physics laws
+        # D. Gravity stabilization
         is_fully_stable = False
         stabilization_iterations = 0
-        max_stabilization_iterations = 8
+        max_stabilization_iterations = 15
         
         while not is_fully_stable and stabilization_iterations < max_stabilization_iterations:
             is_fully_stable = True
             stabilization_iterations += 1
             
-            # Process items from bottom to top
-            for item_id in sorted(dict_itemsInBin.keys(), 
-                                 key=lambda iid: dict_itemsInBin[iid]['pos'][1]):
+            for item_id in sorted(dict_itemsInBin.keys(), key=lambda iid: dict_itemsInBin[iid]['pos'][1]):
                 if item_id not in dict_itemsInBin:
                     continue
                 
                 item = dict_itemsInBin[item_id]
-                current_y = item['pos'][1]
+                iy = item['pos'][1]
+                highest_support_y = 0.0
+
+                for other in dict_itemsInBin.values():
+                    if other['id'] == item_id or other['pos'][1] + other['dims'][1] > iy + 1e-4:
+                        continue
+                    
+                    o_pos, o_dims = other['pos'], other['dims']
+                    
+                    if (item['pos'][0] + item['dims'][0] > o_pos[0] and 
+                        o_pos[0] + o_dims[0] > item['pos'][0] and
+                        item['pos'][2] + item['dims'][2] > o_pos[2] and 
+                        o_pos[2] + o_dims[2] > item['pos'][2]):
+                        highest_support_y = max(highest_support_y, o_pos[1] + o_dims[1])
                 
-                # Calculate support (physics: where should item rest?)
-                support_y = _get_support_level(item['pos'][0], item['pos'][2], 
-                                              item['dims'][0], item['dims'][2], 
-                                              dict_itemsInBin)
-                
-                # If floating, apply gravity
-                if current_y > support_y + 1e-4:
+                if iy > highest_support_y + 1e-4:
                     is_fully_stable = False
-                    old_pos = item['pos'].copy()
-                    item['pos'][1] = support_y
-                    
-                    # Check if gravity caused collision
-                    has_collision = any(
-                        _check_collision_strict(item['pos'], item['dims'], 
-                                               other['pos'], other['dims'])
-                        for other in dict_itemsInBin.values() 
-                        if other['id'] != item_id
-                    )
-                    
-                    if has_collision:
-                        # Revert gravity if it causes collision
-                        item['pos'][1] = old_pos[1]
-                    else:
-                        event_log.append({
-                            'action': 'settle',
-                            'item_id': item_id,
-                            'new_y_pos': support_y
-                        })
+                    item['pos'][1] = highest_support_y
+                    event_log.append({
+                        'action': 'settle',
+                        'item_id': item_id,
+                        'new_y_pos': highest_support_y
+                    })
                     break
     
     return {

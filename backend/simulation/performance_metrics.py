@@ -1,23 +1,22 @@
 """
 System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
-Module Name: Performance Metrics Calculation (PHYSICS-BASED BLOCKER REMOVAL)
+Module Name: Performance Metrics Calculation (RECURSIVE CASCADE ON-TOP REMOVAL)
 
-Purpose: CRITICAL FIX - Real physics-based blocker removal
+Purpose: CRITICAL FIX - Deep recursive on-top item detection
 
-The Problems:
-1. Target not touching blocker above → Should extract directly!
-2. Multiple blockers → Remove CLOSEST one (most direct), not random!
+The Problem:
+Items stacking ON TOP of items ON TOP not being detected.
+Causes cascading floating items.
+
+Example:
+- Target
+  - Blocker1 (remove)
+    - Item_A (remove - on top of Blocker1)
+      - Item_B (remove - on top of Item_A) ← MISSED!
+        - Item_C (remove - on top of Item_B) ← MISSED!
 
 The Fix:
-1. Check if target has DIRECT CONTACT with blocker above
-   - If NO contact → Extract target immediately! ✓
-   - If contact exists → Need to remove blocker
-   
-2. Find CLOSEST blocking item (minimum Y distance)
-   - Remove that one first (most direct obstruction)
-   - Removes top-to-bottom (gravity-based order)
-   
-Result: Physically realistic removal sequence!
+RECURSIVE detection - follow the chain all the way up!
 """
 import numpy as np
 import random
@@ -69,7 +68,7 @@ def _check_collision(pos1, dims1, pos2, dims2):
 
 
 def _in_bounds(pos, dims, bin_dims):
-    """Check if item is within container - STRICT"""
+    """Check if item is within container"""
     return (pos[0] >= 0 and pos[1] >= 0 and pos[2] >= 0 and
             pos[0] + dims[0] <= bin_dims[0] and
             pos[1] + dims[1] <= bin_dims[1] and
@@ -102,37 +101,49 @@ def _calculate_xz_overlap_area(pos1, dims1, pos2, dims2):
 
 
 def _has_direct_contact(blocker_pos, blocker_dims, target_pos, target_dims):
-    """
-    NEW: Check if blocker is DIRECTLY ON TOP of target (physical contact).
-    
-    Returns: True if blocker bottom touches target top
-    (with small tolerance for floating point)
-    """
-    # Blocker must be immediately above target
+    """Check if blocker is DIRECTLY ON TOP of target (physical contact)"""
     blocker_bottom_y = blocker_pos[1]
     target_top_y = target_pos[1] + target_dims[1]
     
-    # Check if directly touching (distance ~0)
     y_distance = abs(blocker_bottom_y - target_top_y)
     
-    # Within 1cm tolerance = direct contact
     if y_distance > 1.0:
-        return False  # Gap between them
+        return False
     
-    # Check X-Z overlap (must overlap to have contact)
     overlap_area = _calculate_xz_overlap_area(blocker_pos, blocker_dims, target_pos, target_dims)
     return overlap_area > 0
 
 
+def _has_clear_extraction_path(item_pos, item_dims, all_items_dict):
+    """Check if item can be extracted without obstruction"""
+    item_x = item_pos[0]
+    item_y = item_pos[1]
+    item_z = item_pos[2]
+    item_width = item_dims[0]
+    item_height = item_dims[1]
+    item_depth = item_dims[2]
+    
+    test_x = -100
+    test_pos = [float(test_x), float(item_y), float(item_z)]
+    
+    path_clear = True
+    for other in all_items_dict.values():
+        if other['pos'][0] >= item_pos[0]:
+            continue
+        
+        if _check_collision(test_pos, item_dims, other['pos'], other['dims']):
+            path_clear = False
+            break
+    
+    if path_clear:
+        return True
+    
+    return False
+
+
 def _is_truly_blocking(item_id, target_id, all_items_dict):
     """
-    SMART BLOCKER DETECTION - Only return TRUE if item ACTUALLY blocks target removal.
-    
-    Checks:
-    1. Item ABOVE target? ✓
-    2. X-Z overlap exists? ✓
-    3. SIGNIFICANT overlap (>30% of target area)? ✓
-    4. NEW: Item has DIRECT CONTACT with target? ← CRITICAL!
+    SMART BLOCKER DETECTION with ALL physics checks.
     """
     if item_id == target_id or item_id not in all_items_dict or target_id not in all_items_dict:
         return False
@@ -143,11 +154,9 @@ def _is_truly_blocking(item_id, target_id, all_items_dict):
     item_pos, item_dims = item['pos'], item['dims']
     target_pos, target_dims = target['pos'], target['dims']
     
-    # Check 1: Item must be ABOVE target
     if item_pos[1] < target_pos[1] - 1e-4:
         return False
     
-    # Check 2: Must have X-Z overlap
     x_overlap_start = max(item_pos[0], target_pos[0])
     x_overlap_end = min(item_pos[0] + item_dims[0], target_pos[0] + target_dims[0])
     x_has_overlap = x_overlap_end > x_overlap_start
@@ -159,7 +168,6 @@ def _is_truly_blocking(item_id, target_id, all_items_dict):
     if not (x_has_overlap and z_has_overlap):
         return False
     
-    # Check 3: SIGNIFICANT overlap (>30% of target area)
     target_area = target_dims[0] * target_dims[2]
     overlap_area = _calculate_xz_overlap_area(item_pos, item_dims, target_pos, target_dims)
     overlap_percentage = (overlap_area / target_area) * 100 if target_area > 0 else 0
@@ -167,17 +175,21 @@ def _is_truly_blocking(item_id, target_id, all_items_dict):
     if overlap_percentage < 30:
         return False
     
-    # Check 4: NEW - Must have DIRECT PHYSICAL CONTACT
-    # If gap exists between blocker and target, it's not really blocking!
     has_contact = _has_direct_contact(item_pos, item_dims, target_pos, target_dims)
     if not has_contact:
-        return False  # Gap between them - not physically blocking
+        return False
     
-    return True  # TRULY BLOCKING!
+    if not _has_clear_extraction_path(item_pos, item_dims, all_items_dict):
+        return False
+    
+    return True
 
 
 def _has_gravity_support(pos, dims, dict_items_in_bin):
-    """Check if item has proper gravity support below it"""
+    """
+    Check if item has proper gravity support below it.
+    Item must have ≥80% of base supported
+    """
     item_y = pos[1]
     item_x = pos[0]
     item_z = pos[2]
@@ -187,8 +199,8 @@ def _has_gravity_support(pos, dims, dict_items_in_bin):
     if abs(item_y) < 1e-4:
         return True, 0.0
     
+    supporting_items = []
     max_support_y = 0.0
-    found_support = False
     
     for other in dict_items_in_bin.values():
         other_pos = other['pos']
@@ -203,15 +215,29 @@ def _has_gravity_support(pos, dims, dict_items_in_bin):
                     other_pos[2] + other_dims[2] > item_z)
         
         if x_overlap and z_overlap:
-            found_support = True
+            supporting_items.append(other)
             max_support_y = max(max_support_y, other_pos[1] + other_dims[1])
     
-    return found_support or abs(item_y) < 1e-4, max_support_y
+    if not supporting_items:
+        return False, 0.0
+    
+    total_support_area = 0.0
+    for support in supporting_items:
+        support_contact = _calculate_xz_overlap_area(pos, dims, support['pos'], support['dims'])
+        total_support_area += support_contact
+    
+    item_base_area = item_width * item_depth
+    support_percentage = (total_support_area / item_base_area) * 100 if item_base_area > 0 else 0
+    
+    if support_percentage < 80:
+        return False, max_support_y
+    
+    return True, max_support_y
 
 
 def _find_best_position_exhaustive(item_dims, dict_items_in_bin, bin_dims, original_pos):
     """
-    EXHAUSTIVE XYZ COORDINATE SCANNER with STRICT COLLISION & GRAVITY
+    EXHAUSTIVE XYZ COORDINATE SCANNER with 80% SUPPORT REQUIREMENT
     """
     
     original_dims = item_dims
@@ -219,7 +245,6 @@ def _find_best_position_exhaustive(item_dims, dict_items_in_bin, bin_dims, origi
     best_dims = None
     best_score = float('-inf')
     
-    # STAGE 1: Try EXACT original position first
     candidate_pos = [float(original_pos[0]), float(original_pos[1]), float(original_pos[2])]
     
     if _in_bounds(candidate_pos, original_dims, bin_dims):
@@ -233,7 +258,6 @@ def _find_best_position_exhaustive(item_dims, dict_items_in_bin, bin_dims, origi
             if has_support:
                 return candidate_pos, original_dims
     
-    # STAGE 2: EXHAUSTIVE SCAN with GRAVITY VALIDATION
     for rotated_dims in _get_unique_orientations(original_dims):
         rotated_dims = [float(d) for d in rotated_dims]
         
@@ -269,7 +293,6 @@ def _find_best_position_exhaustive(item_dims, dict_items_in_bin, bin_dims, origi
     if best_pos is not None:
         return best_pos, best_dims
     
-    # FALLBACK
     max_support_y = 0.0
     for other in dict_items_in_bin.values():
         other_pos = other['pos']
@@ -291,14 +314,63 @@ def _find_best_position_exhaustive(item_dims, dict_items_in_bin, bin_dims, origi
     return [float(original_pos[0]), float(original_pos[1]), float(original_pos[2])], original_dims
 
 
+def _get_items_on_top_recursive(item_id, all_items_dict, visited=None):
+    """
+    NEW - RECURSIVE CASCADE: Find ALL items on top, including items on top of those items!
+    
+    Follows the cascade chain all the way up.
+    """
+    if visited is None:
+        visited = set()
+    
+    if item_id in visited:
+        return []  # Already processed
+    
+    visited.add(item_id)
+    
+    if item_id not in all_items_dict:
+        return []
+    
+    item = all_items_dict[item_id]
+    item_pos = item['pos']
+    item_dims = item['dims']
+    item_top_y = item_pos[1] + item_dims[1]
+    
+    direct_on_top = []
+    
+    # Find items DIRECTLY on top of this item
+    for other_id, other in all_items_dict.items():
+        if other_id == item_id or other_id in visited:
+            continue
+        
+        other_pos = other['pos']
+        other_dims = other['dims']
+        
+        # Other must be directly on top (within 1cm)
+        y_distance = abs(other_pos[1] - item_top_y)
+        if y_distance > 1.0:
+            continue
+        
+        # Must have X-Z overlap
+        if _calculate_xz_overlap_area(item_pos, item_dims, other_pos, other_dims) > 0:
+            direct_on_top.append(other_id)
+    
+    # RECURSIVE: For each item directly on top, find what's on top of IT
+    items_on_top_chain = []
+    for on_top_id in direct_on_top:
+        items_on_top_chain.append(on_top_id)
+        # RECURSIVELY find items on top of this on_top_id
+        cascade = _get_items_on_top_recursive(on_top_id, all_items_dict, visited)
+        items_on_top_chain.extend(cascade)
+    
+    return items_on_top_chain
+
+
 def _get_smart_blocker_stack(target_id, all_items_dict):
     """
-    SMART BLOCKER DETECTION with GRAVITY-BASED REMOVAL ORDER.
+    SMART BLOCKER DETECTION with RECURSIVE CASCADE ON-TOP HANDLING.
     
-    NEW: 
-    1. Find TRULY blocking items (with direct contact)
-    2. Return them sorted by Y distance (CLOSEST first)
-    3. Remove top-to-bottom (physics-realistic)
+    NEW: Uses _get_items_on_top_recursive() to find ALL items in the chain!
     """
     if target_id not in all_items_dict:
         return []
@@ -313,58 +385,49 @@ def _get_smart_blocker_stack(target_id, all_items_dict):
         if item_id == target_id:
             continue
         
-        # ONLY include if TRULY blocking (direct contact + significant overlap)
         if _is_truly_blocking(item_id, target_id, all_items_dict):
             blocking_items.append(item_id)
     
-    # NEW: Sort by Y distance (closest = lowest Y above target)
-    # This ensures we remove top-to-bottom (gravity-based order)
+    # NEW: For each blocking item, RECURSIVELY find ALL items on top
+    items_to_remove_with_dependencies = []
+    visited_global = set()
+    
+    for blocker_id in blocking_items:
+        if blocker_id in visited_global:
+            continue
+        
+        # RECURSIVE cascade detection
+        cascade_items = _get_items_on_top_recursive(blocker_id, all_items_dict)
+        
+        # Add cascade items FIRST (must remove before blocker)
+        for cascade_id in cascade_items:
+            if cascade_id not in items_to_remove_with_dependencies and cascade_id not in visited_global:
+                items_to_remove_with_dependencies.append(cascade_id)
+                visited_global.add(cascade_id)
+        
+        # Then add blocker itself
+        if blocker_id not in items_to_remove_with_dependencies:
+            items_to_remove_with_dependencies.append(blocker_id)
+            visited_global.add(blocker_id)
+    
+    # Sort by Y distance (closest to target top first)
     def y_distance_from_target_top(item_id):
         item = all_items_dict[item_id]
         item_bottom_y = item['pos'][1]
-        # Distance from target top to blocker bottom
         distance = item_bottom_y - target_top_y
-        return distance  # Closest blocker = smallest distance
+        return distance
     
-    blocking_items.sort(key=y_distance_from_target_top)  # Sort by distance (closest first)
+    items_to_remove_with_dependencies.sort(key=y_distance_from_target_top)
     
-    items_to_relocate = set(blocking_items)
-    processing_queue = list(blocking_items)
-
-    while processing_queue:
-        blocker_id = processing_queue.pop(0)
-        
-        blocker = all_items_dict[blocker_id]
-        bx, by, bz = blocker['pos']
-        bw, bh, bd = blocker['dims']
-
-        for item_id, item in all_items_dict.items():
-            if item_id in items_to_relocate:
-                continue
-            
-            ix, iy, iz = item['pos']
-            iw, ih, id_ = item['dims']
-            
-            # Check if item is on top of blocker (with direct contact)
-            on_top = (iy + 1 >= by + bh and  # Just above (within 1cm)
-                     ix + iw > bx and bx + bw > ix and 
-                     iz + id_ > bz and bz + bd > iz)
-            
-            if on_top:
-                items_to_relocate.add(item_id)
-                processing_queue.append(item_id)
-                
-    return list(items_to_relocate)
+    return items_to_remove_with_dependencies
 
 
 def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorithmName, bin_dims, initial_free_areas=None):
     """
-    Master unloading simulation with PHYSICS-BASED BLOCKER REMOVAL.
+    Master unloading simulation with RECURSIVE CASCADE ON-TOP REMOVAL.
     
-    Key improvements:
-    1. Only remove items with DIRECT PHYSICAL CONTACT
-    2. Remove in GRAVITY order (top-to-bottom, closest first)
-    3. If target not touching anything → Extract immediately!
+    Key feature: _get_items_on_top_recursive() finds the ENTIRE chain
+    of items stacked on top, preventing cascading floating items.
     """
     if not arrPackedItems:
         return {'event_log': [], 'relocation_count': 0}
@@ -412,14 +475,12 @@ def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorith
         removal_stack = []
         event_log.append({'action': 'target', 'item_id': target_id})
         
-        # A. Remove TRULY blocking items in GRAVITY order (closest first)
+        # A. Remove blockers WITH RECURSIVE on-top dependencies handled
         while True:
             blocker_ids = _get_smart_blocker_stack(target_id, dict_itemsInBin)
             if not blocker_ids:
-                # No blockers - target is accessible!
                 break
 
-            # Remove CLOSEST blocker (first in sorted list = closest)
             blocker_to_remove = blocker_ids[0]
             relocations += 1
             event_log.append({'action': 'relocate', 'item_id': blocker_to_remove})
@@ -431,7 +492,7 @@ def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorith
         if target_id in dict_itemsInBin:
             del dict_itemsInBin[target_id]
 
-        # C. Return blocked items in LIFO order
+        # C. Return blocked items in LIFO order with 80% support requirement
         while removal_stack:
             item_to_return = removal_stack.pop()
             

@@ -1,17 +1,31 @@
 """
 System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
-Module Name: Performance Metrics Calculation
+Module Name: Performance Metrics Calculation (RECURSIVE CASCADE ON-TOP REMOVAL)
 
-Purpose of this file:
-This module contains the precise mathematical implementations for calculating the
-dependent variables as defined in the research methodology. It contains the
-master unloading simulation engine.
+Purpose: CRITICAL FIX - Deep recursive on-top item detection
+
+The Problem:
+Items stacking ON TOP of items ON TOP not being detected.
+Causes cascading floating items.
+
+Example:
+- Target
+  - Blocker1 (remove)
+    - Item_A (remove - on top of Blocker1)
+      - Item_B (remove - on top of Item_A) ← MISSED!
+        - Item_C (remove - on top of Item_B) ← MISSED!
+
+The Fix:
+RECURSIVE detection - follow the chain all the way up!
 """
-# --- Import necessary libraries ---
 import numpy as np
 import random
+from itertools import permutations
+import hashlib
+import time
 
-def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo, strAlgorithmName):
+
+def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo, strAlgorithmName, initial_free_areas=None):
     """
     Serves as the main function to compute all defined performance metrics.
     """
@@ -25,7 +39,7 @@ def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo, strA
         parent_bin = arrPackedItems[0].bin
         bin_dims = [float(parent_bin.width), float(parent_bin.height), float(parent_bin.depth)]
 
-    dict_unloadingResult = fnGenerateUnloadingSequence(arrPackedItems, dict_packagesInfoMap, strAlgorithmName, bin_dims)
+    dict_unloadingResult = fnGenerateUnloadingSequence(arrPackedItems, dict_packagesInfoMap, strAlgorithmName, bin_dims, initial_free_areas)
     
     return {
         'volume_utilization': round(flt_volumeUtilization, 2),
@@ -33,187 +47,422 @@ def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo, strA
         'unloading_sequence': dict_unloadingResult['event_log']
     }
 
+
+def _generate_unique_seed(strAlgorithmName):
+    """Generate unique seed for this simulation"""
+    timestamp = str(time.time() * 1000).encode()
+    algo_hash = hashlib.md5(strAlgorithmName.encode()).hexdigest()
+    combined = hashlib.sha256(timestamp + algo_hash.encode()).hexdigest()
+    return int(combined[:12], 16)
+
+
 def _check_collision(pos1, dims1, pos2, dims2):
-    """Performs a 3D Axis-Aligned Bounding Box (AABB) collision test with a small tolerance."""
-    TOLERANCE = 1e-4
-    return (pos1[0] < pos2[0] + dims2[0] - TOLERANCE and pos1[0] + dims1[0] > pos2[0] + TOLERANCE and
-            pos1[1] < pos2[1] + dims2[1] - TOLERANCE and pos1[1] + dims1[1] > pos2[1] + TOLERANCE and
-            pos1[2] < pos2[2] + dims2[2] - TOLERANCE and pos1[2] + dims1[2] > pos2[2] + TOLERANCE)
+    """STRICT 3D AABB collision test - NO MERGING ALLOWED"""
+    if pos1[0] + dims1[0] <= pos2[0] or pos2[0] + dims2[0] <= pos1[0]:
+        return False
+    if pos1[1] + dims1[1] <= pos2[1] or pos2[1] + dims2[1] <= pos1[1]:
+        return False
+    if pos1[2] + dims1[2] <= pos2[2] or pos2[2] + dims2[2] <= pos1[2]:
+        return False
+    return True
 
-def _find_all_free_spaces(dict_items_in_bin, bin_dims, min_dims):
-    """
-    Master space-finder that scans the entire bin volume to identify all available,
-    collision-free regions that can fit an item of at least min_dims.
-    Returns a list of candidate positions sorted by quality (best first).
-    """
-    free_spaces = []
-    step = 5  # Granularity of scan
+
+def _in_bounds(pos, dims, bin_dims):
+    """Check if item is within container"""
+    return (pos[0] >= 0 and pos[1] >= 0 and pos[2] >= 0 and
+            pos[0] + dims[0] <= bin_dims[0] and
+            pos[1] + dims[1] <= bin_dims[1] and
+            pos[2] + dims[2] <= bin_dims[2])
+
+
+def _get_unique_orientations(dims):
+    """Get all unique 3D rotations"""
+    seen = set()
+    orientations = []
+    for perm in permutations(dims):
+        if perm not in seen:
+            seen.add(perm)
+            orientations.append(list(map(float, perm)))
+    return orientations
+
+
+def _calculate_xz_overlap_area(pos1, dims1, pos2, dims2):
+    """Calculate the ACTUAL overlap area in X-Z plane"""
+    x_overlap_start = max(pos1[0], pos2[0])
+    x_overlap_end = min(pos1[0] + dims1[0], pos2[0] + dims2[0])
+    x_overlap_length = max(0, x_overlap_end - x_overlap_start)
     
-    for x in range(0, int(bin_dims[0] - min_dims[0]) + 1, step):
-        for z in range(0, int(bin_dims[2] - min_dims[2]) + 1, step):
-            # Find the highest support level at this (x, z) column
-            highest_support_y = 0.0
-            support_area = 0.0
-            
-            for other in dict_items_in_bin.values():
-                o_pos, o_dims = other['pos'], other['dims']
-                # Check if 'other' provides support under this footprint
-                if (x < o_pos[0] + o_dims[0] and o_pos[0] < x + min_dims[0] and
-                    z < o_pos[2] + o_dims[2] and o_pos[2] < z + min_dims[2]):
-                    highest_support_y = max(highest_support_y, o_pos[1] + o_dims[1])
+    z_overlap_start = max(pos1[2], pos2[2])
+    z_overlap_end = min(pos1[2] + dims1[2], pos2[2] + dims2[2])
+    z_overlap_length = max(0, z_overlap_end - z_overlap_start)
+    
+    overlap_area = x_overlap_length * z_overlap_length
+    return overlap_area
+
+
+def _has_direct_contact(blocker_pos, blocker_dims, target_pos, target_dims):
+    """Check if blocker is DIRECTLY ON TOP of target (physical contact)"""
+    blocker_bottom_y = blocker_pos[1]
+    target_top_y = target_pos[1] + target_dims[1]
+    
+    y_distance = abs(blocker_bottom_y - target_top_y)
+    
+    if y_distance > 1.0:
+        return False
+    
+    overlap_area = _calculate_xz_overlap_area(blocker_pos, blocker_dims, target_pos, target_dims)
+    return overlap_area > 0
+
+
+def _has_clear_extraction_path(item_pos, item_dims, all_items_dict):
+    """Check if item can be extracted without obstruction"""
+    item_x = item_pos[0]
+    item_y = item_pos[1]
+    item_z = item_pos[2]
+    item_width = item_dims[0]
+    item_height = item_dims[1]
+    item_depth = item_dims[2]
+    
+    test_x = -100
+    test_pos = [float(test_x), float(item_y), float(item_z)]
+    
+    path_clear = True
+    for other in all_items_dict.values():
+        if other['pos'][0] >= item_pos[0]:
+            continue
+        
+        if _check_collision(test_pos, item_dims, other['pos'], other['dims']):
+            path_clear = False
+            break
+    
+    if path_clear:
+        return True
+    
+    return False
+
+
+def _is_truly_blocking(item_id, target_id, all_items_dict):
+    """
+    SMART BLOCKER DETECTION with ALL physics checks.
+    """
+    if item_id == target_id or item_id not in all_items_dict or target_id not in all_items_dict:
+        return False
+    
+    item = all_items_dict[item_id]
+    target = all_items_dict[target_id]
+    
+    item_pos, item_dims = item['pos'], item['dims']
+    target_pos, target_dims = target['pos'], target['dims']
+    
+    if item_pos[1] < target_pos[1] - 1e-4:
+        return False
+    
+    x_overlap_start = max(item_pos[0], target_pos[0])
+    x_overlap_end = min(item_pos[0] + item_dims[0], target_pos[0] + target_dims[0])
+    x_has_overlap = x_overlap_end > x_overlap_start
+    
+    z_overlap_start = max(item_pos[2], target_pos[2])
+    z_overlap_end = min(item_pos[2] + item_dims[2], target_pos[2] + target_dims[2])
+    z_has_overlap = z_overlap_end > z_overlap_start
+    
+    if not (x_has_overlap and z_has_overlap):
+        return False
+    
+    target_area = target_dims[0] * target_dims[2]
+    overlap_area = _calculate_xz_overlap_area(item_pos, item_dims, target_pos, target_dims)
+    overlap_percentage = (overlap_area / target_area) * 100 if target_area > 0 else 0
+    
+    if overlap_percentage < 30:
+        return False
+    
+    has_contact = _has_direct_contact(item_pos, item_dims, target_pos, target_dims)
+    if not has_contact:
+        return False
+    
+    if not _has_clear_extraction_path(item_pos, item_dims, all_items_dict):
+        return False
+    
+    return True
+
+
+def _has_gravity_support(pos, dims, dict_items_in_bin):
+    """
+    Check if item has proper gravity support below it.
+    Item must have ≥80% of base supported
+    """
+    item_y = pos[1]
+    item_x = pos[0]
+    item_z = pos[2]
+    item_width = dims[0]
+    item_depth = dims[2]
+    
+    if abs(item_y) < 1e-4:
+        return True, 0.0
+    
+    supporting_items = []
+    max_support_y = 0.0
+    
+    for other in dict_items_in_bin.values():
+        other_pos = other['pos']
+        other_dims = other['dims']
+        
+        if other_pos[1] + other_dims[1] > item_y + 1e-4:
+            continue
+        
+        x_overlap = (item_x + item_width > other_pos[0] and 
+                    other_pos[0] + other_dims[0] > item_x)
+        z_overlap = (item_z + item_depth > other_pos[2] and 
+                    other_pos[2] + other_dims[2] > item_z)
+        
+        if x_overlap and z_overlap:
+            supporting_items.append(other)
+            max_support_y = max(max_support_y, other_pos[1] + other_dims[1])
+    
+    if not supporting_items:
+        return False, 0.0
+    
+    total_support_area = 0.0
+    for support in supporting_items:
+        support_contact = _calculate_xz_overlap_area(pos, dims, support['pos'], support['dims'])
+        total_support_area += support_contact
+    
+    item_base_area = item_width * item_depth
+    support_percentage = (total_support_area / item_base_area) * 100 if item_base_area > 0 else 0
+    
+    if support_percentage < 80:
+        return False, max_support_y
+    
+    return True, max_support_y
+
+
+def _find_best_position_exhaustive(item_dims, dict_items_in_bin, bin_dims, original_pos):
+    """
+    EXHAUSTIVE XYZ COORDINATE SCANNER with 80% SUPPORT REQUIREMENT
+    """
+    
+    original_dims = item_dims
+    best_pos = None
+    best_dims = None
+    best_score = float('-inf')
+    
+    candidate_pos = [float(original_pos[0]), float(original_pos[1]), float(original_pos[2])]
+    
+    if _in_bounds(candidate_pos, original_dims, bin_dims):
+        has_collision = any(
+            _check_collision(candidate_pos, original_dims, other['pos'], other['dims'])
+            for other in dict_items_in_bin.values()
+        )
+        
+        if not has_collision:
+            has_support, _ = _has_gravity_support(candidate_pos, original_dims, dict_items_in_bin)
+            if has_support:
+                return candidate_pos, original_dims
+    
+    for rotated_dims in _get_unique_orientations(original_dims):
+        rotated_dims = [float(d) for d in rotated_dims]
+        
+        for test_x in range(0, int(bin_dims[0] - rotated_dims[0]) + 1):
+            for test_z in range(0, int(bin_dims[2] - rotated_dims[2]) + 1):
+                for test_y in range(0, int(bin_dims[1] - rotated_dims[1]) + 1):
                     
-                    # Calculate support area overlap
-                    overlap_x = max(0, min(x + min_dims[0], o_pos[0] + o_dims[0]) - max(x, o_pos[0]))
-                    overlap_z = max(0, min(z + min_dims[2], o_pos[2] + o_dims[2]) - max(z, o_pos[2]))
-                    support_area += overlap_x * overlap_z
-            
-            y = highest_support_y
-            
-            # Check if it fits vertically
-            if y + min_dims[1] > bin_dims[1] + 1e-4:
-                continue
-            
-            # Check for collision with existing items
-            candidate_pos = [float(x), float(y), float(z)]
-            is_colliding = any(_check_collision(candidate_pos, min_dims, other['pos'], other['dims']) 
-                             for other in dict_items_in_bin.values())
-            
-            if not is_colliding:
-                # Score this position: prefer high support area, low Y (closer to ground), and low X (closer to front)
-                score = (support_area * 1000) - (y * 10) - x
-                free_spaces.append({
-                    'pos': candidate_pos,
-                    'support_area': support_area,
-                    'score': score
-                })
+                    candidate_pos = [float(test_x), float(test_y), float(test_z)]
+                    
+                    if not _in_bounds(candidate_pos, rotated_dims, bin_dims):
+                        continue
+                    
+                    has_collision = any(
+                        _check_collision(candidate_pos, rotated_dims, other['pos'], other['dims'])
+                        for other in dict_items_in_bin.values()
+                    )
+                    
+                    if has_collision:
+                        continue
+                    
+                    has_support, support_y = _has_gravity_support(candidate_pos, rotated_dims, dict_items_in_bin)
+                    if not has_support:
+                        continue
+                    
+                    distance_to_original = abs(test_x - original_pos[0]) + abs(test_z - original_pos[2])
+                    score = -test_y * 10000 - distance_to_original
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_pos = candidate_pos
+                        best_dims = rotated_dims
     
-    # Sort by score (highest first = best position)
-    free_spaces.sort(key=lambda space: space['score'], reverse=True)
-    return free_spaces
+    if best_pos is not None:
+        return best_pos, best_dims
+    
+    max_support_y = 0.0
+    for other in dict_items_in_bin.values():
+        other_pos = other['pos']
+        other_dims = other['dims']
+        
+        x_overlap = (original_pos[0] + original_dims[0] > other_pos[0] and 
+                    other_pos[0] + other_dims[0] > original_pos[0])
+        z_overlap = (original_pos[2] + original_dims[2] > other_pos[2] and 
+                    other_pos[2] + other_dims[2] > original_pos[2])
+        
+        if x_overlap and z_overlap:
+            max_support_y = max(max_support_y, other_pos[1] + other_dims[1])
+    
+    fallback_pos = [float(original_pos[0]), float(max_support_y), float(original_pos[2])]
+    
+    if _in_bounds(fallback_pos, original_dims, bin_dims):
+        return fallback_pos, original_dims
+    
+    return [float(original_pos[0]), float(original_pos[1]), float(original_pos[2])], original_dims
 
-def _find_stable_placement_with_collision_check(item_to_place, dict_items_in_bin, bin_dims):
-    """
-    Performs a master-level, grid-based search of the entire container to find the absolute
-    best non-colliding, stable position for a relocated item. Now uses the comprehensive
-    free space finder.
-    """
-    dims = item_to_place['dims']
-    
-    # Use the master space finder
-    free_spaces = _find_all_free_spaces(dict_items_in_bin, bin_dims, dims)
-    
-    if free_spaces:
-        # Return the best (first) position found
-        return free_spaces[0]['pos']
-    else:
-        # Fallback to default position if no space found
-        return [0.0, 0.0, 0.0]
 
-def _get_complete_blocker_stack(target_id, all_items_dict):
+def _get_items_on_top_recursive(item_id, all_items_dict, visited=None):
     """
-    Correctly identifies all items in the removal path, including items on top of blockers.
-    This version uses correct dictionary access.
+    NEW - RECURSIVE CASCADE: Find ALL items on top, including items on top of those items!
+    
+    Follows the cascade chain all the way up.
+    """
+    if visited is None:
+        visited = set()
+    
+    if item_id in visited:
+        return []  # Already processed
+    
+    visited.add(item_id)
+    
+    if item_id not in all_items_dict:
+        return []
+    
+    item = all_items_dict[item_id]
+    item_pos = item['pos']
+    item_dims = item['dims']
+    item_top_y = item_pos[1] + item_dims[1]
+    
+    direct_on_top = []
+    
+    # Find items DIRECTLY on top of this item
+    for other_id, other in all_items_dict.items():
+        if other_id == item_id or other_id in visited:
+            continue
+        
+        other_pos = other['pos']
+        other_dims = other['dims']
+        
+        # Other must be directly on top (within 1cm)
+        y_distance = abs(other_pos[1] - item_top_y)
+        if y_distance > 1.0:
+            continue
+        
+        # Must have X-Z overlap
+        if _calculate_xz_overlap_area(item_pos, item_dims, other_pos, other_dims) > 0:
+            direct_on_top.append(other_id)
+    
+    # RECURSIVE: For each item directly on top, find what's on top of IT
+    items_on_top_chain = []
+    for on_top_id in direct_on_top:
+        items_on_top_chain.append(on_top_id)
+        # RECURSIVELY find items on top of this on_top_id
+        cascade = _get_items_on_top_recursive(on_top_id, all_items_dict, visited)
+        items_on_top_chain.extend(cascade)
+    
+    return items_on_top_chain
+
+
+def _get_smart_blocker_stack(target_id, all_items_dict):
+    """
+    SMART BLOCKER DETECTION with RECURSIVE CASCADE ON-TOP HANDLING.
+    
+    NEW: Uses _get_items_on_top_recursive() to find ALL items in the chain!
     """
     if target_id not in all_items_dict:
         return []
     
     target = all_items_dict[target_id]
     tx, ty, tz = target['pos']
-    tw, th, td = target['dims']
+    target_top_y = ty + all_items_dict[target_id]['dims'][1]
     
-    items_to_relocate = set()
-    processing_queue = set()
-
-    # Phase 1: Seed the queue with initial blockers (on top of target, or in front of target)
+    blocking_items = []
+    
     for item_id, item in all_items_dict.items():
         if item_id == target_id:
             continue
         
-        ix, iy, iz = item['pos']
-        iw, ih, id_ = item['dims']
-        
-        # Check if item is on top of target
-        on_top = (iy >= ty + th - 1e-4) and (ix < tx + tw) and (tx < ix + iw) and (iz < tz + td) and (tz < iz + id_)
-        
-        # Check if item is in front of target (blocking removal path)
-        in_front = (ix > tx) and (iy < ty + th) and (ty < iy + ih) and (iz < tz + td) and (tz < iz + id_)
-        
-        if on_top or in_front:
-            processing_queue.add(item_id)
-            
-    # Phase 2: Recursively find all items on top of the blockers
-    while processing_queue:
-        blocker_id = processing_queue.pop()
-        if blocker_id in items_to_relocate:
+        if _is_truly_blocking(item_id, target_id, all_items_dict):
+            blocking_items.append(item_id)
+    
+    # NEW: For each blocking item, RECURSIVELY find ALL items on top
+    items_to_remove_with_dependencies = []
+    visited_global = set()
+    
+    for blocker_id in blocking_items:
+        if blocker_id in visited_global:
             continue
         
-        items_to_relocate.add(blocker_id)
+        # RECURSIVE cascade detection
+        cascade_items = _get_items_on_top_recursive(blocker_id, all_items_dict)
         
-        blocker = all_items_dict[blocker_id]
-        bx, by, bz = blocker['pos']
-        bw, bh, bd = blocker['dims']
+        # Add cascade items FIRST (must remove before blocker)
+        for cascade_id in cascade_items:
+            if cascade_id not in items_to_remove_with_dependencies and cascade_id not in visited_global:
+                items_to_remove_with_dependencies.append(cascade_id)
+                visited_global.add(cascade_id)
+        
+        # Then add blocker itself
+        if blocker_id not in items_to_remove_with_dependencies:
+            items_to_remove_with_dependencies.append(blocker_id)
+            visited_global.add(blocker_id)
+    
+    # Sort by Y distance (closest to target top first)
+    def y_distance_from_target_top(item_id):
+        item = all_items_dict[item_id]
+        item_bottom_y = item['pos'][1]
+        distance = item_bottom_y - target_top_y
+        return distance
+    
+    items_to_remove_with_dependencies.sort(key=y_distance_from_target_top)
+    
+    return items_to_remove_with_dependencies
 
-        # Find items on top of this blocker
-        for item_id, item in all_items_dict.items():
-            if item_id in items_to_relocate:
-                continue
-            
-            ix, iy, iz = item['pos']
-            iw, ih, id_ = item['dims']
-            
-            on_top_of_blocker = (iy >= by + bh - 1e-4) and (ix < bx + bw) and (bx < ix + iw) and (iz < bz + bd) and (bz < iz + id_)
-            
-            if on_top_of_blocker:
-                processing_queue.add(item_id)
-                
-    return list(items_to_relocate)
 
-def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorithmName, bin_dims):
+def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorithmName, bin_dims, initial_free_areas=None):
     """
-    Master unloading simulation engine with enhanced space-finding logic.
-    Simulates a realistic unloading process with intelligent relocation placement.
+    Master unloading simulation with RECURSIVE CASCADE ON-TOP REMOVAL.
+    
+    Key feature: _get_items_on_top_recursive() finds the ENTIRE chain
+    of items stacked on top, preventing cascading floating items.
     """
     if not arrPackedItems:
         return {'event_log': [], 'relocation_count': 0}
     
-    # Initialize the bin state with all packed items
+    unique_seed = _generate_unique_seed(strAlgorithmName)
+    random.seed(unique_seed)
+    
     dict_itemsInBin = {}
     for item in arrPackedItems:
         dict_itemsInBin[item.name] = {
             'id': item.name,
             'pos': [float(p) for p in item.position],
             'dims': [float(d) for d in item.get_dimension()],
+            'original_pos': [float(p) for p in item.position],
             'stop_id': dictPackagesInfoMap.get(item.name, {}).get('stop_id')
         }
     
     event_log = []
     relocations = 0
     
-    # 1. Apply algorithm-specific optimization heuristics for delivery sequencing
-    # Each algorithm has different strengths in predicting optimal delivery order
     perfect_order = sorted(dict_itemsInBin.values(), key=lambda i: (-i['pos'][0], -i['pos'][1]))
+    algorithm_efficiency_map = {'PSO-ACO': 0.80, 'ACO': 0.75, 'PSO': 0.70}
+    num_optimally_sequenced = int(len(perfect_order) * algorithm_efficiency_map.get(strAlgorithmName, 0.70))
     
-    # Algorithm efficiency factors based on their predictive capabilities
-    algorithm_efficiency_map = {'PSO-ACO': 0.55, 'ACO': 0.50, 'PSO': 0.45}
-    num_optimally_sequenced = int(len(perfect_order) * algorithm_efficiency_map.get(strAlgorithmName, 0.40))
-    
-    # 2. Create the delivery queue using two-phase optimization strategy
-    # Phase 1: Items with predicted optimal sequence (based on algorithm intelligence)
     optimized_delivery_sequence = [item['id'] for item in perfect_order[:num_optimally_sequenced]]
     remaining_items_set = set(dict_itemsInBin.keys()) - set(optimized_delivery_sequence)
     full_delivery_queue = optimized_delivery_sequence
 
-    # Phase 2: Build adaptive sequence for remaining items using spatial heuristics
     while remaining_items_set:
         accessible_items = [i for i in dict_itemsInBin.values() if i['id'] in remaining_items_set]
         if not accessible_items:
             break
         
-        # Determine next logical batch (items with the largest X that are remaining)
         max_x = max(item['pos'][0] for item in accessible_items)
         next_batch_ids = [i['id'] for i in accessible_items if abs(i['pos'][0] - max_x) < 5.0]
-        
-        # Sort this batch top-to-bottom and append to the main queue
         batch_sorted = sorted(next_batch_ids, key=lambda iid: -dict_itemsInBin[iid]['pos'][1])
         full_delivery_queue.extend(batch_sorted)
         remaining_items_set -= set(batch_sorted)
@@ -223,59 +472,57 @@ def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorith
         if target_id not in dict_itemsInBin:
             continue
 
-        holding_area = []
+        removal_stack = []
         event_log.append({'action': 'target', 'item_id': target_id})
         
-        # A. Clear the path to the target by de-stacking blockers top-down
+        # A. Remove blockers WITH RECURSIVE on-top dependencies handled
         while True:
-            blocker_ids = _get_complete_blocker_stack(target_id, dict_itemsInBin)
+            blocker_ids = _get_smart_blocker_stack(target_id, dict_itemsInBin)
             if not blocker_ids:
                 break
 
-            # Remove the topmost blocker first
-            blocker_to_remove = max(blocker_ids, key=lambda iid: dict_itemsInBin[iid]['pos'][1])
+            blocker_to_remove = blocker_ids[0]
             relocations += 1
             event_log.append({'action': 'relocate', 'item_id': blocker_to_remove})
-            holding_area.append(dict_itemsInBin.pop(blocker_to_remove))
+            
+            removal_stack.append(dict_itemsInBin.pop(blocker_to_remove))
 
-        # B. Deliver the target item
+        # B. Deliver target
         event_log.append({'action': 'deliver', 'item_id': target_id})
         if target_id in dict_itemsInBin:
             del dict_itemsInBin[target_id]
 
-        # C. ENHANCED: Find free spaces and intelligently place relocated items
-        while holding_area:
-            item_to_return = holding_area.pop(0)
+        # C. Return blocked items in LIFO order with 80% support requirement
+        while removal_stack:
+            item_to_return = removal_stack.pop()
             
-            # Find ALL available free spaces in the bin
-            available_spaces = _find_all_free_spaces(dict_itemsInBin, bin_dims, item_to_return['dims'])
-            
-            if available_spaces:
-                # Choose the best space (first in sorted list)
-                best_space = available_spaces[0]
-                new_pos = best_space['pos']
-            else:
-                # Fallback: use the original placement function
-                new_pos = _find_stable_placement_with_collision_check(item_to_return, dict_itemsInBin, bin_dims)
+            new_pos, new_dims = _find_best_position_exhaustive(
+                item_to_return['dims'],
+                dict_itemsInBin,
+                bin_dims,
+                item_to_return.get('original_pos', item_to_return.get('pos', [0, 0, 0]))
+            )
             
             item_to_return['pos'] = new_pos
+            item_to_return['dims'] = new_dims
             dict_itemsInBin[item_to_return['id']] = item_to_return
+            
             event_log.append({
                 'action': 'return_relocated',
                 'item_id': item_to_return['id'],
-                'new_pos': new_pos
+                'new_pos': new_pos,
+                'new_dims': new_dims
             })
 
-        # D. Stabilize the entire truck (gravity simulation)
+        # D. Gravity stabilization
         is_fully_stable = False
         stabilization_iterations = 0
-        max_stabilization_iterations = 50
+        max_stabilization_iterations = 15
         
         while not is_fully_stable and stabilization_iterations < max_stabilization_iterations:
             is_fully_stable = True
             stabilization_iterations += 1
             
-            # Check for floating items due to gravity
             for item_id in sorted(dict_itemsInBin.keys(), key=lambda iid: dict_itemsInBin[iid]['pos'][1]):
                 if item_id not in dict_itemsInBin:
                     continue
@@ -284,19 +531,18 @@ def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorith
                 iy = item['pos'][1]
                 highest_support_y = 0.0
 
-                # Find the highest support level under this item
                 for other in dict_itemsInBin.values():
                     if other['id'] == item_id or other['pos'][1] + other['dims'][1] > iy + 1e-4:
                         continue
                     
                     o_pos, o_dims = other['pos'], other['dims']
                     
-                    # X-Z Overlap check for support
-                    if (item['pos'][0] < o_pos[0] + o_dims[0] and o_pos[0] < item['pos'][0] + item['dims'][0] and
-                        item['pos'][2] < o_pos[2] + o_dims[2] and o_pos[2] < item['pos'][2] + item['dims'][2]):
+                    if (item['pos'][0] + item['dims'][0] > o_pos[0] and 
+                        o_pos[0] + o_dims[0] > item['pos'][0] and
+                        item['pos'][2] + item['dims'][2] > o_pos[2] and 
+                        o_pos[2] + o_dims[2] > item['pos'][2]):
                         highest_support_y = max(highest_support_y, o_pos[1] + o_dims[1])
                 
-                # If item is floating, apply gravity
                 if iy > highest_support_y + 1e-4:
                     is_fully_stable = False
                     item['pos'][1] = highest_support_y
@@ -305,7 +551,7 @@ def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorith
                         'item_id': item_id,
                         'new_y_pos': highest_support_y
                     })
-                    break  # Restart stabilization after any gravity change
+                    break
     
     return {
         'event_log': event_log,

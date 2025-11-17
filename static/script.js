@@ -80,7 +80,7 @@ document.addEventListener("DOMContentLoaded", () =>
     const g_objVisualizeDropdown = document.getElementById('visualize-dropdown-content');
     const g_objVizStaticBtn = document.getElementById('viz-static-btn');
     const g_objVizLoadAnimBtn = document.getElementById('viz-load-anim-btn');
-    // const g_objVizUnloadAnimBtn = document.getElementById('viz-unload-anim-btn');
+    const g_objVizUnloadAnimBtn = document.getElementById('viz-unload-anim-btn');
     
     // References to the user guide modal and its buttons.
     const g_objGuidesModal = document.getElementById("guidesModal");
@@ -190,11 +190,11 @@ document.addEventListener("DOMContentLoaded", () =>
         g_objVisualizeDropdown.classList.remove('show-dropdown');
     });
 
-    // g_objVizUnloadAnimBtn.addEventListener('click', (e) => {
-    //     e.preventDefault();
-    //     _openVisualizationWindow('unload');
-    //     g_objVisualizeDropdown.classList.remove('show-dropdown');
-    // });
+    g_objVizUnloadAnimBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        _openVisualizationWindow('unload');
+        g_objVisualizeDropdown.classList.remove('show-dropdown');
+    });
 
     // This allows the user to close a modal by clicking on the dark background area outside of it.
     window.onclick = (event) => 

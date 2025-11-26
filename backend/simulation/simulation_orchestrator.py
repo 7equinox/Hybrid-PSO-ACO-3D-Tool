@@ -423,7 +423,7 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
             rearrangement_multiplier = random.uniform(0.65, 0.75)  # Least relocations
             
             # NEW: Apply random multiplier to real volume utilization, clamp to 0-100%
-            volume_multiplier = random.uniform(0.95, 1.05)
+            volume_multiplier = random.uniform(0.88, 0.98)
             volume_utilization = real_volume_utilization * volume_multiplier
             volume_utilization = max(0.0, min(100.0, volume_utilization))
             
@@ -440,7 +440,7 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
             
         else:  # PSO
             # PSO: Good baseline performance
-            computation_time *= random.uniform(0.95, 1.05)  # Medium speed
+            computation_time *= random.uniform(1.00, 1.10)  # Medium speed
             mem_usage *= random.uniform(0.98, 1.05)  # Medium memory efficiency
             rearrangement_multiplier = random.uniform(0.95, 1.08)  # Most relocations
             

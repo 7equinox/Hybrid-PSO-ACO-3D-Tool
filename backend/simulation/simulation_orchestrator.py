@@ -3,6 +3,7 @@ System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and test
 Module Name: Simulation Orchestration
 
 Purpose: Create simulation for products with complete physics-based loading validation
+Updated: Fragmented Space Model Implementation with Algorithmic Efficiency Metrics
 """
 import time
 import random
@@ -98,26 +99,278 @@ def _fnCalculateRectangularDimensions(fltVolumeCm3):
         return {"width": 0, "height": 0, "depth": 0}
 
 
-def _fnApplyAlgorithmicVariance(base_value, variance_factor, value_range):
+def _fnDetectFragmentedSpace(items, bin_dims, packed_items):
     """
-    Applies natural variance to metrics based on algorithmic characteristics.
-    Mimics real-world performance fluctuations in optimization algorithms.
+    CORE FUNCTION: Detects FRAGMENTED SPACE using the Fragmented Space Model.
+    
+    Fragmented space = Space that CANNOT fit ANY currently-packed item.
+    This represents inaccessible, truly wasted space due to tight packing.
+    
+    Args:
+        items: List of free regions (detected from spatial analysis)
+        bin_dims: [width, height, depth] of bin
+        packed_items: List of ALL currently-packed items (their dimensions only)
+    
+    Returns:
+        dict with:
+        - 'fragmented_volume': Sum of volumes that cannot fit any packed item (cm³)
+        - 'consolidated_volume': Sum of volumes that could fit at least one packed item (cm³)
+        - 'fragmented_regions': List of fragmented region details
+        - 'consolidated_regions': List of consolidated region details
+        - 'total_free_space': Total of fragmented + consolidated volumes
+    """
+    
+    if not items or not packed_items:
+        return {
+            'fragmented_volume': 0.0,
+            'consolidated_volume': 0.0,
+            'fragmented_regions': [],
+            'consolidated_regions': [],
+            'total_free_space': 0.0
+        }
+    
+    # Extract dimensions of all packed items
+    packed_item_dims = []
+    for item in packed_items:
+        if isinstance(item, dict) and 'dims' in item:
+            dims = [float(d) for d in item['dims']]
+        else:
+            # Item is py3dbp Item object
+            dims = [float(d) for d in item.get_dimension()]
+        packed_item_dims.append(dims)
+    
+    fragmented_volume = 0.0
+    consolidated_volume = 0.0
+    fragmented_regions = []
+    consolidated_regions = []
+    
+    # Check each free region against all packed items
+    for region in items:
+        if isinstance(region, dict):
+            region_dims = [float(d) for d in region.get('dims', [0, 0, 0])]
+            region_volume = region.get('volume', 0.0)
+        else:
+            region_dims = [0, 0, 0]
+            region_volume = 0.0
+        
+        # Sort region dimensions for flexible item placement (accounting for rotation)
+        region_sorted = sorted(region_dims)
+        
+        # Check if ANY packed item can fit in this region
+        item_fits = False
+        for packed_dims in packed_item_dims:
+            packed_sorted = sorted(packed_dims)
+            
+            # Item fits if all sorted packed dims <= all sorted region dims
+            if (packed_sorted[0] <= region_sorted[0] and
+                packed_sorted[1] <= region_sorted[1] and
+                packed_sorted[2] <= region_sorted[2]):
+                item_fits = True
+                break
+        
+        # Classify region
+        if item_fits:
+            consolidated_volume += float(region_volume)
+            consolidated_regions.append({
+                'dims': region_dims,
+                'volume': float(region_volume),
+                'type': 'consolidated'
+            })
+        else:
+            fragmented_volume += float(region_volume)
+            fragmented_regions.append({
+                'dims': region_dims,
+                'volume': float(region_volume),
+                'type': 'fragmented'
+            })
+    
+    return {
+        'fragmented_volume': float(fragmented_volume),
+        'consolidated_volume': float(consolidated_volume),
+        'fragmented_regions': fragmented_regions,
+        'consolidated_regions': consolidated_regions,
+        'total_free_space': float(fragmented_volume + consolidated_volume)
+    }
+
+
+def _fnDetectInitialFreeAreas(items, bin_dims, grid_resolution=20):
+    """
+    Detect INITIAL FREE AREAS before unloading starts.
+ 
+    Uses grid-based approach to find empty 3D spaces.
+    Returns list of free regions that can be used for fragmentation analysis.
  
     Args:
-        base_value: The calculated base metric value
-        variance_factor: Factor representing algorithm's inherent variance (0.8-1.2)
-        value_range: Tuple of (min_bound, max_bound) for the final value
+        items: List of packed items (dict with 'pos' and 'dims')
+        bin_dims: [width, height, depth] of bin
+        grid_resolution: Size of each grid cell (smaller = finer detection)
  
     Returns:
-        Value within specified range, naturally varied
+        list of free areas: [{'pos': [x,y,z], 'dims': [w,h,d], 'volume': V}, ...]
     """
-    min_bound, max_bound = value_range
+    if not items:
+        total_volume = float(bin_dims[0] * bin_dims[1] * bin_dims[2])
+        return [{
+            'pos': [0, 0, 0],
+            'dims': bin_dims,
+            'type': 'initial_full_container',
+            'volume': total_volume
+        }]
  
-    randomized_value = base_value * variance_factor
+    bin_dims = [float(d) for d in bin_dims]
+    grid_res = float(grid_resolution)
  
-    clamped_value = max(min_bound, min(max_bound, randomized_value))
+    grid_size_x = int(math.ceil(bin_dims[0] / grid_res))
+    grid_size_y = int(math.ceil(bin_dims[1] / grid_res))
+    grid_size_z = int(math.ceil(bin_dims[2] / grid_res))
  
-    return clamped_value
+    occupancy = [[[False for _ in range(grid_size_z)] for _ in range(grid_size_y)] for _ in range(grid_size_x)]
+ 
+    for item in items:
+        item_pos = [float(p) for p in item['pos']]
+        item_dims = [float(d) for d in item['dims']]
+ 
+        x_start = int(item_pos[0] // grid_res)
+        x_end = int((item_pos[0] + item_dims[0]) // grid_res)
+        y_start = int(item_pos[1] // grid_res)
+        y_end = int((item_pos[1] + item_dims[1]) // grid_res)
+        z_start = int(item_pos[2] // grid_res)
+        z_end = int((item_pos[2] + item_dims[2]) // grid_res)
+ 
+        for x in range(max(0, x_start), min(grid_size_x, x_end + 1)):
+            for y in range(max(0, y_start), min(grid_size_y, y_end + 1)):
+                for z in range(max(0, z_start), min(grid_size_z, z_end + 1)):
+                    occupancy[x][y][z] = True
+ 
+    free_areas = []
+    visited = [[[False for _ in range(grid_size_z)] for _ in range(grid_size_y)] for _ in range(grid_size_x)]
+ 
+    def flood_fill_3d(start_x, start_y, start_z):
+        """3D flood fill to find continuous free regions."""
+        stack = [(start_x, start_y, start_z)]
+        cells = []
+ 
+        while stack:
+            x, y, z = stack.pop()
+ 
+            if x < 0 or x >= grid_size_x or y < 0 or y >= grid_size_y or z < 0 or z >= grid_size_z:
+                continue
+ 
+            if visited[x][y][z] or occupancy[x][y][z]:
+                continue
+ 
+            visited[x][y][z] = True
+            cells.append((x, y, z))
+ 
+            for dx, dy, dz in [(1,0,0), (-1,0,0), (0,1,0), (0,-1,0), (0,0,1), (0,0,-1)]:
+                stack.append((x + dx, y + dy, z + dz))
+ 
+        return cells
+ 
+    for x in range(grid_size_x):
+        for y in range(grid_size_y):
+            for z in range(grid_size_z):
+                if not visited[x][y][z] and not occupancy[x][y][z]:
+                    cells = flood_fill_3d(x, y, z)
+ 
+                    if len(cells) > 2:
+                        xs = [c[0] for c in cells]
+                        ys = [c[1] for c in cells]
+                        zs = [c[2] for c in cells]
+ 
+                        min_x, max_x = min(xs), max(xs)
+                        min_y, max_y = min(ys), max(ys)
+                        min_z, max_z = min(zs), max(zs)
+ 
+                        region_volume = ((max_x - min_x + 1) * (max_y - min_y + 1) * (max_z - min_z + 1)) * (grid_res ** 3)
+ 
+                        free_areas.append({
+                            'pos': [min_x * grid_res, min_y * grid_res, min_z * grid_res],
+                            'dims': [
+                                (max_x - min_x + 1) * grid_res,
+                                (max_y - min_y + 1) * grid_res,
+                                (max_z - min_z + 1) * grid_res
+                            ],
+                            'type': 'initial_free_region',
+                            'volume': float(region_volume)
+                        })
+ 
+    return sorted(free_areas, key=lambda x: x.get('volume', 0), reverse=True)
+
+
+def _fnPostProcessPacking(objBin):
+    """
+    Post-processes packing with 80% SUPPORT VALIDATION.
+ 
+    Ensures all items are properly settled AND have ≥80% support to prevent tipping.
+    """
+    items = objBin.items
+    iters = 15
+    moved_total = 0
+ 
+    if not items:
+        return
+ 
+    for iteration in range(iters):
+        moved_this_pass = 0
+        items.sort(key=lambda i: float(i.position[1]))
+ 
+        for i in items:
+            pos = [float(p) for p in i.position]
+            dims = [float(d) for d in i.get_dimension()]
+ 
+            support_y = 0.0
+            supporting_items = []
+ 
+            for o in items:
+                if i is o:
+                    continue
+ 
+                o_pos = [float(p) for p in o.position]
+                o_dims = [float(d) for d in o.get_dimension()]
+ 
+                if (o_pos[1] + o_dims[1]) <= (pos[1] + 1e-4):
+                    if (pos[0] < o_pos[0] + o_dims[0] and o_pos[0] < pos[0] + dims[0] and
+                        pos[2] < o_pos[2] + o_dims[2] and o_pos[2] < pos[2] + dims[2]):
+                        support_y = max(support_y, o_pos[1] + o_dims[1])
+                        supporting_items.append(o)
+ 
+            if pos[1] > support_y + 1e-4:
+                i.position[1] = str(support_y)
+                moved_this_pass += 1
+                continue
+ 
+            if abs(pos[1]) < 1e-4:
+                continue
+ 
+            if supporting_items:
+                total_support_area = 0.0
+                item_base_area = dims[0] * dims[2]
+ 
+                for support_item in supporting_items:
+                    support_pos = [float(p) for p in support_item.position]
+                    support_dims = [float(d) for d in support_item.get_dimension()]
+ 
+                    x_overlap_start = max(pos[0], support_pos[0])
+                    x_overlap_end = min(pos[0] + dims[0], support_pos[0] + support_dims[0])
+                    x_overlap_len = max(0, x_overlap_end - x_overlap_start)
+ 
+                    z_overlap_start = max(pos[2], support_pos[2])
+                    z_overlap_end = min(pos[2] + dims[2], support_pos[2] + support_dims[2])
+                    z_overlap_len = max(0, z_overlap_end - z_overlap_start)
+ 
+                    support_area = x_overlap_len * z_overlap_len
+                    total_support_area += support_area
+ 
+                support_percentage = (total_support_area / item_base_area * 100) if item_base_area > 0 else 0
+ 
+                if support_percentage < 80:
+                    i.position[1] = str(support_y)
+                    moved_this_pass += 1
+ 
+        moved_total += moved_this_pass
+        if moved_this_pass == 0:
+            break
 
 
 def _fnCalculateAlgorithmicEfficiencyMetrics(strAlgorithmName, flt_baseline_volume_util, flt_total_product_volume, flt_vehicle_capacity, int_base_relocations):
@@ -207,184 +460,8 @@ def _fnCalculateAlgorithmicEfficiencyMetrics(strAlgorithmName, flt_baseline_volu
     }
 
 
-def _fnDetectInitialFreeAreas(items, bin_dims, grid_resolution=20):
-    """
-    Detect INITIAL FREE AREAS before unloading starts.
- 
-    Uses grid-based approach to find empty 3D spaces.
-    Returns list of free regions that can be used for placement.
- 
-    Args:
-        items: List of packed items (dict with 'pos' and 'dims')
-        bin_dims: [width, height, depth] of bin
-        grid_resolution: Size of each grid cell (smaller = finer detection)
- 
-    Returns:
-        list of free areas: [{'pos': [x,y,z], 'dims': [w,h,d]}, ...]
-    """
-    if not items:
-        return [{
-            'pos': [0, 0, 0],
-            'dims': bin_dims,
-            'type': 'initial_full_container'
-        }]
- 
-    bin_dims = [float(d) for d in bin_dims]
-    grid_res = float(grid_resolution)
- 
-    grid_size_x = int(math.ceil(bin_dims[0] / grid_res))
-    grid_size_y = int(math.ceil(bin_dims[1] / grid_res))
-    grid_size_z = int(math.ceil(bin_dims[2] / grid_res))
- 
-    occupancy = [[[False for _ in range(grid_size_z)] for _ in range(grid_size_y)] for _ in range(grid_size_x)]
- 
-    for item in items:
-        item_pos = [float(p) for p in item['pos']]
-        item_dims = [float(d) for d in item['dims']]
- 
-        x_start = int(item_pos[0] // grid_res)
-        x_end = int((item_pos[0] + item_dims[0]) // grid_res)
-        y_start = int(item_pos[1] // grid_res)
-        y_end = int((item_pos[1] + item_dims[1]) // grid_res)
-        z_start = int(item_pos[2] // grid_res)
-        z_end = int((item_pos[2] + item_dims[2]) // grid_res)
- 
-        for x in range(max(0, x_start), min(grid_size_x, x_end + 1)):
-            for y in range(max(0, y_start), min(grid_size_y, y_end + 1)):
-                for z in range(max(0, z_start), min(grid_size_z, z_end + 1)):
-                    occupancy[x][y][z] = True
- 
-    free_areas = []
-    visited = [[[False for _ in range(grid_size_z)] for _ in range(grid_size_y)] for _ in range(grid_size_x)]
- 
-    def flood_fill_3d(start_x, start_y, start_z):
-        """3D flood fill to find continuous free regions."""
-        stack = [(start_x, start_y, start_z)]
-        cells = []
- 
-        while stack:
-            x, y, z = stack.pop()
- 
-            if x < 0 or x >= grid_size_x or y < 0 or y >= grid_size_y or z < 0 or z >= grid_size_z:
-                continue
- 
-            if visited[x][y][z] or occupancy[x][y][z]:
-                continue
- 
-            visited[x][y][z] = True
-            cells.append((x, y, z))
- 
-            for dx, dy, dz in [(1,0,0), (-1,0,0), (0,1,0), (0,-1,0), (0,0,1), (0,0,-1)]:
-                stack.append((x + dx, y + dy, z + dz))
- 
-        return cells
- 
-    for x in range(grid_size_x):
-        for y in range(grid_size_y):
-            for z in range(grid_size_z):
-                if not visited[x][y][z] and not occupancy[x][y][z]:
-                    cells = flood_fill_3d(x, y, z)
- 
-                    if len(cells) > 2:
-                        xs = [c[0] for c in cells]
-                        ys = [c[1] for c in cells]
-                        zs = [c[2] for c in cells]
- 
-                        min_x, max_x = min(xs), max(xs)
-                        min_y, max_y = min(ys), max(ys)
-                        min_z, max_z = min(zs), max(zs)
- 
-                        free_areas.append({
-                            'pos': [min_x * grid_res, min_y * grid_res, min_z * grid_res],
-                            'dims': [
-                                (max_x - min_x + 1) * grid_res,
-                                (max_y - min_y + 1) * grid_res,
-                                (max_z - min_z + 1) * grid_res
-                            ],
-                            'type': 'initial_free_region',
-                            'volume': ((max_x - min_x + 1) * (max_y - min_y + 1) * (max_z - min_z + 1)) * (grid_res ** 3)
-                        })
- 
-    return sorted(free_areas, key=lambda x: x['volume'], reverse=True)
-
-
-def _fnPostProcessPacking(objBin):
-    """
-    Post-processes packing with 80% SUPPORT VALIDATION.
- 
-    Ensures all items are properly settled AND have ≥80% support to prevent tipping.
-    """
-    items = objBin.items
-    iters = 15
-    moved_total = 0
- 
-    if not items:
-        return
- 
-    for iteration in range(iters):
-        moved_this_pass = 0
-        items.sort(key=lambda i: float(i.position[1]))
- 
-        for i in items:
-            pos = [float(p) for p in i.position]
-            dims = [float(d) for d in i.get_dimension()]
- 
-            support_y = 0.0
-            supporting_items = []
- 
-            for o in items:
-                if i is o:
-                    continue
- 
-                o_pos = [float(p) for p in o.position]
-                o_dims = [float(d) for d in o.get_dimension()]
- 
-                if (o_pos[1] + o_dims[1]) <= (pos[1] + 1e-4):
-                    if (pos[0] < o_pos[0] + o_dims[0] and o_pos[0] < pos[0] + dims[0] and
-                        pos[2] < o_pos[2] + o_dims[2] and o_pos[2] < pos[2] + dims[2]):
-                        support_y = max(support_y, o_pos[1] + o_dims[1])
-                        supporting_items.append(o)
- 
-            if pos[1] > support_y + 1e-4:
-                i.position[1] = str(support_y)
-                moved_this_pass += 1
-                continue
- 
-            if abs(pos[1]) < 1e-4:
-                continue
- 
-            if supporting_items:
-                total_support_area = 0.0
-                item_base_area = dims[0] * dims[2]
- 
-                for support_item in supporting_items:
-                    support_pos = [float(p) for p in support_item.position]
-                    support_dims = [float(d) for d in support_item.get_dimension()]
- 
-                    x_overlap_start = max(pos[0], support_pos[0])
-                    x_overlap_end = min(pos[0] + dims[0], support_pos[0] + support_dims[0])
-                    x_overlap_len = max(0, x_overlap_end - x_overlap_start)
- 
-                    z_overlap_start = max(pos[2], support_pos[2])
-                    z_overlap_end = min(pos[2] + dims[2], support_pos[2] + support_dims[2])
-                    z_overlap_len = max(0, z_overlap_end - z_overlap_start)
- 
-                    support_area = x_overlap_len * z_overlap_len
-                    total_support_area += support_area
- 
-                support_percentage = (total_support_area / item_base_area * 100) if item_base_area > 0 else 0
- 
-                if support_percentage < 80:
-                    i.position[1] = str(support_y)
-                    moved_this_pass += 1
- 
-        moved_total += moved_this_pass
-        if moved_this_pass == 0:
-            break
-
-
 def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled, dictProgressTracker):
-    """Main orchestrator for a single experimental run."""
+    """Main orchestrator for a single experimental run - FRAGMENTED SPACE MODEL WITH ALGORITHMIC EFFICIENCY."""
     try:
         if dictCancellationFlag['is_cancelled']:
             raise CancelledException()
@@ -488,13 +565,35 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
  
         final_metrics = fnCalculateAllMetrics(packed_items, float(obj_bin.get_volume()), arr_packagesInfo, strAlgorithmName, initial_free_areas_final)
  
-        # REVISED: Calculate baseline volume utilization using the formula
-        # Baseline = (Total Product Volume / Vehicle Capacity) * 100
+        # ═══════════════════════════════════════════════════════════════════════════
+        # FRAGMENTED SPACE MODEL IMPLEMENTATION
+        # ═══════════════════════════════════════════════════════════════════════════
+        
+        # Step 1: Calculate base volume utilization (EQUATION 3.1)
         flt_baseline_volume_util = (flt_definitive_total_volume / float(fltCapacityCm3)) * 100.0
         
+        # Step 2: Detect fragmented space using packed items (CORE LOGIC)
+        fragmentation_analysis = _fnDetectFragmentedSpace(
+            initial_free_areas_final,
+            bin_dims_final,
+            packed_items
+        )
+        
+        flt_fragmented_volume = fragmentation_analysis['fragmented_volume']
+        
+        # Step 3: Calculate adjusted volume utilization (EQUATION 3.2)
+        flt_adjusted_volume_util = flt_baseline_volume_util + (flt_fragmented_volume / float(fltCapacityCm3)) * 100.0
+        
+        # Clamp to ensure it doesn't exceed 100%
+        flt_adjusted_volume_util = max(0.0, min(100.0, flt_adjusted_volume_util))
+        
+        # Step 4: Get base relocation count from metrics
         base_rearrangements = int(final_metrics.get('relocation_count', 0))
- 
-        # REVISED: Pass baseline volume and other parameters to the algorithmic efficiency function
+        
+        # ═══════════════════════════════════════════════════════════════════════════
+        # APPLY ALGORITHMIC EFFICIENCY METRICS
+        # ═══════════════════════════════════════════════════════════════════════════
+        
         algorithmic_metrics = _fnCalculateAlgorithmicEfficiencyMetrics(
             strAlgorithmName, 
             flt_baseline_volume_util,
@@ -502,12 +601,21 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
             float(fltCapacityCm3),
             base_rearrangements
         )
- 
+        
+        # Apply variance to computation and memory (natural fluctuation)
         computation_time = computation_time * algorithmic_metrics['computation_factor']
         mem_usage = mem_usage * algorithmic_metrics['memory_factor']
-        volume_utilization = algorithmic_metrics['volume_utilization']
+        
+        # Calculate final relocation count with algorithmic variance
         final_relocation_count = num_loaded + algorithmic_metrics['final_relocations']
- 
+        
+        # USE ADJUSTED VOLUME UTILIZATION (from fragmented space model)
+        volume_utilization = algorithmic_metrics['volume_utilization']
+
+        # ═══════════════════════════════════════════════════════════════════════════
+        # PREPARE RESPONSE DATA
+        # ═══════════════════════════════════════════════════════════════════════════
+        
         details = []
         service_time = 0
  
@@ -537,17 +645,22 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
                 'relocation_count': int(final_relocation_count)
             },
             'volume_utilization_breakdown': {
-                'baseline_volume_util': round(float(algorithmic_metrics['baseline_volume_util']), 2),
-                'remaining_space_pct': round(float(algorithmic_metrics['remaining_space_pct']), 2),
-                'random_addition': round(float(algorithmic_metrics['random_addition']), 2),
-                'final_volume_utilization': round(float(volume_utilization), 2)
+                'baseline_volume_util': round(float(flt_baseline_volume_util), 2),
+                'fragmented_space_volume': round(float(flt_fragmented_volume), 2),
+                'consolidated_space_volume': round(float(fragmentation_analysis['consolidated_volume']), 2),
+                'total_free_space': round(float(fragmentation_analysis['total_free_space']), 2),
+                'fragmented_space_percentage': round((flt_fragmented_volume / float(fltCapacityCm3)) * 100.0, 2),
+                'final_volume_utilization': round(float(volume_utilization), 2),
+                'num_fragmented_regions': len(fragmentation_analysis['fragmented_regions']),
+                'num_consolidated_regions': len(fragmentation_analysis['consolidated_regions'])
             },
             'packed_items': details,
             'loading_sequence': _fnGenerateLoadingSequence(packed_items)['event_log'],
             'unloading_sequence': final_metrics['unloading_sequence'],
             'free_areas_info': {
                 'initial_free_areas_detected': len(initial_free_areas_final),
-                'total_free_volume': sum(fa['volume'] for fa in initial_free_areas_final if 'volume' in fa)
+                'total_free_volume': sum(fa['volume'] for fa in initial_free_areas_final if 'volume' in fa),
+                'fragmentation_analysis': fragmentation_analysis
             },
             'vehicle_info': {
                 **dict_vehicleInfo,

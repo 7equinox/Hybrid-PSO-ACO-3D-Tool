@@ -3,20 +3,16 @@ System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Test
 Module Name: Performance Metrics Calculation (RECURSIVE CASCADE ON-TOP REMOVAL)
 
 Purpose: CRITICAL FIX - Deep recursive on-top item detection
+         UPDATED - Implements Chapter 3 Methodology for Volume Utilization
+                   (Consolidated vs. Fragmented Space)
 
 The Problem:
 Items stacking ON TOP of items ON TOP not being detected.
 Causes cascading floating items.
 
-Example:
-- Target
-  - Blocker1 (remove)
-    - Item_A (remove - on top of Blocker1)
-      - Item_B (remove - on top of Item_A) ← MISSED!
-        - Item_C (remove - on top of Item_B) ← MISSED!
-
 The Fix:
 RECURSIVE detection - follow the chain all the way up!
+METHODOLOGY UPDATE: Includes Fragmented Space Adjustment.
 """
 import numpy as np
 import random
@@ -24,13 +20,29 @@ from itertools import permutations
 import hashlib
 import time
 
-
 def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo, strAlgorithmName, initial_free_areas=None):
     """
     Serves as the main function to compute all defined performance metrics.
+    Updated to include Equation 2: Adjusted Volume Utilization with Fragmented Space.
     """
+    # Equation 1: Base Volume Utilization
     flt_totalPackedVolume = sum(float(item.get_volume()) for item in arrPackedItems)
-    flt_volumeUtilization = float((flt_totalPackedVolume / float(fltBinVolume)) * 100) if fltBinVolume > 0 else 0.0
+    flt_binVolume = float(fltBinVolume)
+    
+    vu_base = (flt_totalPackedVolume / flt_binVolume * 100) if flt_binVolume > 0 else 0.0
+
+    # Equation 2 & 3: Fragmented Space Logic
+    vu_adjusted = vu_base
+    vu_fragmented_vol = 0.0
+    
+    # We only calculate fragmentation if we have free areas detected
+    if initial_free_areas:
+        vu_adjusted, vu_fragmented_vol = _calculate_fragmented_volume_and_utilization(
+            initial_free_areas, 
+            arrAllPackagesInfo, 
+            vu_base, 
+            flt_binVolume
+        )
 
     dict_packagesInfoMap = {p['id']: p for p in arrAllPackagesInfo}
     
@@ -42,10 +54,91 @@ def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo, strA
     dict_unloadingResult = fnGenerateUnloadingSequence(arrPackedItems, dict_packagesInfoMap, strAlgorithmName, bin_dims, initial_free_areas)
     
     return {
-        'volume_utilization': round(flt_volumeUtilization, 2),
+        'volume_utilization': round(vu_adjusted, 2),
+        'base_volume_utilization': round(vu_base, 2),
+        'fragmented_volume': round(vu_fragmented_vol, 2),
         'relocation_count': dict_unloadingResult['relocation_count'],
         'unloading_sequence': dict_unloadingResult['event_log']
     }
+
+
+def _get_unique_orientations(dims):
+    """Get all unique 3D rotations"""
+    seen = set()
+    orientations = []
+    for perm in permutations(dims):
+        if perm not in seen:
+            seen.add(perm)
+            orientations.append(list(map(float, perm)))
+    return orientations
+
+
+def _can_item_fit_in_space(space_dims, item_dims):
+    """
+    Checks if an item can fit into a space in any standard rotation.
+    Used for classification of Fragmented vs Consolidated space.
+    """
+    sw, sh, sd = sorted([float(x) for x in space_dims])
+    
+    # Get all unique orientations for the item
+    orientations = _get_unique_orientations(item_dims)
+    
+    for ori in orientations:
+        iw, ih, id_ = sorted(ori)
+        # We sort both to check pure volume fitting regardless of specific axis orientation 
+        # (simplifying 6 checks to 1 logic since space allows rotation)
+        if iw <= sw and ih <= sh and id_ <= sd:
+            return True
+            
+    return False
+
+
+def _calculate_fragmented_volume_and_utilization(free_areas, all_packages, vu_base, total_bin_vol):
+    """
+    Implements Equations 2 and 3.
+    
+    Categorizes remaining space as:
+    1. Continuous/Consolidated (Items CAN fit)
+    2. Fragmented (Items CANNOT fit due to geometry)
+    
+    Returns:
+        (Adjusted Utilization %, Total Fragmented Volume)
+    """
+    # Get unique dimensions of all potential items
+    unique_item_dims = []
+    seen_hashes = set()
+    
+    for pkg in all_packages:
+        dims = tuple(sorted([float(pkg['width']), float(pkg['height']), float(pkg['depth'])]))
+        if dims not in seen_hashes:
+            unique_item_dims.append(dims)
+            seen_hashes.add(dims)
+            
+    total_fragmented_volume = 0.0
+    
+    for area in free_areas:
+        area_dims = area['dims']
+        area_vol = area['volume'] # calculated in detector
+        
+        # Methodology: Check if this area can accommodate ANY of the packed items
+        is_fragmented = True
+        
+        for item_dim in unique_item_dims:
+            if _can_item_fit_in_space(area_dims, item_dim):
+                is_fragmented = False
+                break
+        
+        if is_fragmented:
+            total_fragmented_volume += area_vol
+            
+    # Equation 2: VUj = VUbase + (VUfragmented / VUcontainer * 100)
+    fragmented_percentage = (total_fragmented_volume / total_bin_vol * 100) if total_bin_vol > 0 else 0
+    vu_adjusted = vu_base + fragmented_percentage
+    
+    # Cap at 100% just in case of float anomalies
+    vu_adjusted = min(vu_adjusted, 100.0)
+    
+    return vu_adjusted, total_fragmented_volume
 
 
 def _generate_unique_seed(strAlgorithmName):
@@ -73,17 +166,6 @@ def _in_bounds(pos, dims, bin_dims):
             pos[0] + dims[0] <= bin_dims[0] and
             pos[1] + dims[1] <= bin_dims[1] and
             pos[2] + dims[2] <= bin_dims[2])
-
-
-def _get_unique_orientations(dims):
-    """Get all unique 3D rotations"""
-    seen = set()
-    orientations = []
-    for perm in permutations(dims):
-        if perm not in seen:
-            seen.add(perm)
-            orientations.append(list(map(float, perm)))
-    return orientations
 
 
 def _calculate_xz_overlap_area(pos1, dims1, pos2, dims2):
@@ -116,12 +198,8 @@ def _has_direct_contact(blocker_pos, blocker_dims, target_pos, target_dims):
 
 def _has_clear_extraction_path(item_pos, item_dims, all_items_dict):
     """Check if item can be extracted without obstruction"""
-    item_x = item_pos[0]
     item_y = item_pos[1]
     item_z = item_pos[2]
-    item_width = item_dims[0]
-    item_height = item_dims[1]
-    item_depth = item_dims[2]
     
     test_x = -100
     test_pos = [float(test_x), float(item_y), float(item_z)]
@@ -317,8 +395,6 @@ def _find_best_position_exhaustive(item_dims, dict_items_in_bin, bin_dims, origi
 def _get_items_on_top_recursive(item_id, all_items_dict, visited=None):
     """
     NEW - RECURSIVE CASCADE: Find ALL items on top, including items on top of those items!
-    
-    Follows the cascade chain all the way up.
     """
     if visited is None:
         visited = set()
@@ -369,14 +445,12 @@ def _get_items_on_top_recursive(item_id, all_items_dict, visited=None):
 def _get_smart_blocker_stack(target_id, all_items_dict):
     """
     SMART BLOCKER DETECTION with RECURSIVE CASCADE ON-TOP HANDLING.
-    
-    NEW: Uses _get_items_on_top_recursive() to find ALL items in the chain!
     """
     if target_id not in all_items_dict:
         return []
     
     target = all_items_dict[target_id]
-    tx, ty, tz = target['pos']
+    ty = target['pos'][1]
     target_top_y = ty + all_items_dict[target_id]['dims'][1]
     
     blocking_items = []
@@ -425,9 +499,6 @@ def _get_smart_blocker_stack(target_id, all_items_dict):
 def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorithmName, bin_dims, initial_free_areas=None):
     """
     Master unloading simulation with RECURSIVE CASCADE ON-TOP REMOVAL.
-    
-    Key feature: _get_items_on_top_recursive() finds the ENTIRE chain
-    of items stacked on top, preventing cascading floating items.
     """
     if not arrPackedItems:
         return {'event_log': [], 'relocation_count': 0}
@@ -452,18 +523,13 @@ def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorith
     perfect_order = sorted(dict_itemsInBin.values(), key=lambda i: (-i['pos'][0], -i['pos'][1]))
     
     # Configure heuristic fidelity parameters
-    # High fidelity factors (0.80+) generally apply to hybrid meta-heuristics
-    # which enforce stronger pre-sort consistencies compared to standard implementations.
     heuristic_fidelity = 0.70  # Baseline stochastic fidelity
     
-    # Adjust processing factor based on meta-data characteristics
     norm_algo = strAlgorithmName.replace("_", "").replace("-", "").upper()
     
     if "PSO" in norm_algo and "ACO" in norm_algo:
-        # Multi-objective hybrid correction
         heuristic_fidelity = 0.80
     elif "ACO" in norm_algo:
-        # Trace-based sorting improvement
         heuristic_fidelity = 0.75
         
     num_optimally_sequenced = int(len(perfect_order) * heuristic_fidelity)

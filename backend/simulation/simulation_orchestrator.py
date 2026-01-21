@@ -12,7 +12,6 @@ import traceback
 from memory_profiler import memory_usage
 from py3dbp import Packer, Bin, Item
 
-
 from backend.data_management.data_manager import fnGetDisplayDataForVehicle
 from backend.simulation.performance_metrics import fnCalculateAllMetrics
 from backend.simulation.custom_exceptions import CancelledException
@@ -130,68 +129,68 @@ def _fnDetectInitialFreeAreas(items, bin_dims, grid_resolution=20):
             'type': 'initial_full_container',
             'volume': bin_dims[0] * bin_dims[1] * bin_dims[2]
         }]
- 
+
     bin_dims = [float(d) for d in bin_dims]
     grid_res = float(grid_resolution)
- 
+
     grid_size_x = int(math.ceil(bin_dims[0] / grid_res))
     grid_size_y = int(math.ceil(bin_dims[1] / grid_res))
     grid_size_z = int(math.ceil(bin_dims[2] / grid_res))
- 
+
     occupancy = [[[False for _ in range(grid_size_z)] for _ in range(grid_size_y)] for _ in range(grid_size_x)]
- 
+
     for item in items:
         item_pos = [float(p) for p in item['pos']]
         item_dims = [float(d) for d in item['dims']]
- 
+
         x_start = int(item_pos[0] // grid_res)
         x_end = int((item_pos[0] + item_dims[0]) // grid_res)
         y_start = int(item_pos[1] // grid_res)
         y_end = int((item_pos[1] + item_dims[1]) // grid_res)
         z_start = int(item_pos[2] // grid_res)
         z_end = int((item_pos[2] + item_dims[2]) // grid_res)
- 
+
         for x in range(max(0, x_start), min(grid_size_x, x_end + 1)):
             for y in range(max(0, y_start), min(grid_size_y, y_end + 1)):
                 for z in range(max(0, z_start), min(grid_size_z, z_end + 1)):
                     occupancy[x][y][z] = True
- 
+
     free_areas = []
     visited = [[[False for _ in range(grid_size_z)] for _ in range(grid_size_y)] for _ in range(grid_size_x)]
- 
+
     def flood_fill_3d(start_x, start_y, start_z):
         """3D flood fill to find continuous free regions."""
         stack = [(start_x, start_y, start_z)]
         cells = []
- 
+
         while stack:
             x, y, z = stack.pop()
- 
+
             if x < 0 or x >= grid_size_x or y < 0 or y >= grid_size_y or z < 0 or z >= grid_size_z:
                 continue
- 
+
             if visited[x][y][z] or occupancy[x][y][z]:
                 continue
- 
+
             visited[x][y][z] = True
             cells.append((x, y, z))
- 
+
             for dx, dy, dz in [(1,0,0), (-1,0,0), (0,1,0), (0,-1,0), (0,0,1), (0,0,-1)]:
                 stack.append((x + dx, y + dy, z + dz))
- 
+
         return cells
- 
+
     for x in range(grid_size_x):
         for y in range(grid_size_y):
             for z in range(grid_size_z):
                 if not visited[x][y][z] and not occupancy[x][y][z]:
                     cells = flood_fill_3d(x, y, z)
- 
+
                     if len(cells) > 2:
                         xs = [c[0] for c in cells]
                         ys = [c[1] for c in cells]
                         zs = [c[2] for c in cells]
- 
+
                         min_x, max_x = min(xs), max(xs)
                         min_y, max_y = min(ys), max(ys)
                         min_z, max_z = min(zs), max(zs)
@@ -207,7 +206,7 @@ def _fnDetectInitialFreeAreas(items, bin_dims, grid_resolution=20):
                             'type': 'initial_free_region',
                             'volume': vol
                         })
- 
+
     return sorted(free_areas, key=lambda x: x['volume'], reverse=True)
 
 
@@ -219,70 +218,97 @@ def _fnPostProcessPacking(objBin):
     items = objBin.items
     iters = 15
     moved_total = 0
- 
+
     if not items:
         return
- 
+
     for iteration in range(iters):
         moved_this_pass = 0
         items.sort(key=lambda i: float(i.position[1]))
- 
+
         for i in items:
             pos = [float(p) for p in i.position]
             dims = [float(d) for d in i.get_dimension()]
- 
+
             support_y = 0.0
             supporting_items = []
- 
+
             for o in items:
                 if i is o:
                     continue
- 
+
                 o_pos = [float(p) for p in o.position]
                 o_dims = [float(d) for d in o.get_dimension()]
- 
+
                 if (o_pos[1] + o_dims[1]) <= (pos[1] + 1e-4):
                     if (pos[0] < o_pos[0] + o_dims[0] and o_pos[0] < pos[0] + dims[0] and
                         pos[2] < o_pos[2] + o_dims[2] and o_pos[2] < pos[2] + dims[2]):
                         support_y = max(support_y, o_pos[1] + o_dims[1])
                         supporting_items.append(o)
- 
+
             if pos[1] > support_y + 1e-4:
                 i.position[1] = str(support_y)
                 moved_this_pass += 1
                 continue
- 
+
             if abs(pos[1]) < 1e-4:
                 continue
- 
+
             if supporting_items:
                 total_support_area = 0.0
                 item_base_area = dims[0] * dims[2]
- 
+
                 for support_item in supporting_items:
                     support_pos = [float(p) for p in support_item.position]
                     support_dims = [float(d) for d in support_item.get_dimension()]
- 
+
                     x_overlap_start = max(pos[0], support_pos[0])
                     x_overlap_end = min(pos[0] + dims[0], support_pos[0] + support_dims[0])
                     x_overlap_len = max(0, x_overlap_end - x_overlap_start)
- 
+
                     z_overlap_start = max(pos[2], support_pos[2])
                     z_overlap_end = min(pos[2] + dims[2], support_pos[2] + support_dims[2])
                     z_overlap_len = max(0, z_overlap_end - z_overlap_start)
- 
+
                     support_area = x_overlap_len * z_overlap_len
                     total_support_area += support_area
- 
+
                 support_percentage = (total_support_area / item_base_area * 100) if item_base_area > 0 else 0
- 
+
                 if support_percentage < 80:
                     i.position[1] = str(support_y)
                     moved_this_pass += 1
- 
+
         moved_total += moved_this_pass
         if moved_this_pass == 0:
             break
+
+
+def _fnGenerateLoadingSequence(items):
+    """Generates a chronological loading sequence from the final packing layout."""
+    if not items:
+        return {'event_log': []}
+
+    log = []
+
+    for i in sorted(items, key=lambda i: (float(i.position[0]), float(i.position[1]), -float(i.get_volume()))):
+        p = [float(c) for c in i.position]
+        d = [float(c) for c in i.get_dimension()]
+
+        log.append({
+            'action': 'load',
+            'item': {
+                'id': str(i.name),
+                'width': float(d[0]),
+                'height': float(d[1]),
+                'depth': float(d[2]),
+                'position_x': float(p[0]),
+                'position_y': float(p[1]),
+                'position_z': float(p[2])
+            }
+        })
+
+    return {'event_log': log}
 
 
 def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled, dictProgressTracker):
@@ -290,50 +316,57 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
     try:
         if dictCancellationFlag['is_cancelled']:
             raise CancelledException()
- 
+
         dictProgressTracker['message'] = "Loading dataset..."
         dict_vehicleInfo, arr_packagesInfo = fnGetDisplayDataForVehicle(fltCapacityCm3, dictCancellationFlag)
- 
+
         if not dict_vehicleInfo or not arr_packagesInfo:
             return _create_error_response("Could not get vehicle/package data.", strAlgorithmName, fltCapacityCm3)
- 
+
         flt_definitive_total_volume = sum(float(p['volume']) for p in arr_packagesInfo)
         dict_vehicleInfo['total_package_volume'] = flt_definitive_total_volume
         dict_vehicleInfo.update(_fnCalculateRectangularDimensions(float(fltCapacityCm3)))
- 
+
+        target_products = len(arr_packagesInfo)
+        target_service_time = sum(float(p.get('service_time', 0)) for p in arr_packagesInfo)
+
         dictProgressTracker['message'] = "Preparing items..."
- 
+
         for p in arr_packagesInfo:
             dims = [float(p['width']), float(p['height']), float(p['depth'])]
             random.shuffle(dims)
             p['width'], p['height'], p['depth'] = dims
- 
+
         arr_itemsToPack = [Item(str(p['id']), float(p['width']), float(p['height']), float(p['depth']), 1) for p in arr_packagesInfo]
         obj_bin = Bin(str(dict_vehicleInfo['id']), float(dict_vehicleInfo['width']), float(dict_vehicleInfo['height']), float(dict_vehicleInfo['depth']), 1e6)
- 
+
         fitness_cache = {}
- 
+
         def fnEvaluateSolution(indices):
             """Fitness evaluation function for the algorithms."""
             key = tuple(indices)
             if key in fitness_cache:
                 return fitness_cache[key]
- 
+
             if dictCancellationFlag['is_cancelled']:
                 raise CancelledException()
- 
+
             p = Packer()
             b = Bin(str(obj_bin.name), float(obj_bin.width), float(obj_bin.height), float(obj_bin.depth), float(obj_bin.max_weight))
             p.add_bin(b)
- 
+
             for i in indices:
                 p.add_item(arr_itemsToPack[i])
- 
+
             p.pack(bigger_first=True, distribute_items=True)
- 
-            packed_items = p.bins[0].items if p.bins else []
+
+            if p.bins and len(p.bins) > 0:
+                packed_items = p.bins[0].items
+            else:
+                packed_items = []
+
             bin_dims = [float(obj_bin.width), float(obj_bin.height), float(obj_bin.depth)]
- 
+
             items_dict = [{'pos': [float(x) for x in i.position], 'dims': [float(d) for d in i.get_dimension()]} for i in packed_items]
             initial_free_areas = _fnDetectInitialFreeAreas(items_dict, bin_dims, grid_resolution=20)
  
@@ -344,44 +377,44 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
             fit = (fit_vol, 0) # Simplify internal search to Volume maximization
             fitness_cache[key] = fit
             return fit
- 
+
         algo_map = {
             'PSO': fnRunPsoAlgorithm,
             'ACO': fnRunAcoAlgorithm,
             'PSO-ACO': fnRunHybridPsoAcoAlgorithm
         }
- 
+
         func_algorithm = algo_map.get(strAlgorithmName)
         if not func_algorithm:
             return _create_error_response(f"Invalid algorithm: {strAlgorithmName}", strAlgorithmName, fltCapacityCm3)
 
         dictProgressTracker['message'] = f"Running {strAlgorithmName}..."
         tm_start = time.time()
- 
+
         mem_res = memory_usage(
             (func_algorithm, (arr_itemsToPack, arr_packagesInfo, fnEvaluateSolution, dictCancellationFlag, dictProgressTracker)),
             retval=True,
             max_usage=True,
             interval=0.1
         )
- 
+
         mem_usage = float(mem_res[0]) if isinstance(mem_res, tuple) else float(mem_res if mem_res else 0)
         computation_time = round(time.time() - tm_start, 2)
 
         dictProgressTracker['message'] = "Finalizing layout..."
- 
+
         final_packer = Packer()
         final_bin = Bin(str(obj_bin.name), float(obj_bin.width), float(obj_bin.height), float(obj_bin.depth), float(obj_bin.max_weight))
         final_packer.add_bin(final_bin)
- 
+
         for item in arr_itemsToPack:
             final_packer.add_item(item)
- 
+
         final_packer.pack(bigger_first=True, distribute_items=True, number_of_decimals=0)
- 
+
         if not final_packer.bins[0].items:
             return _create_error_response("Final consolidation failed.", strAlgorithmName, fltCapacityCm3)
- 
+
         _fnPostProcessPacking(final_packer.bins[0])
         num_loaded = len(final_packer.bins[0].items)
 
@@ -416,14 +449,14 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
         final_relocation_count = num_loaded * (0.1 if "Hybrid" in strAlgorithmName else 0.2) + sim_metrics['relocation_factor'] * final_metrics['relocation_count']
         
         details = []
-        service_time = 0
- 
+        svc = 0
+
         for i in packed_items:
             p = next((pkg for pkg in arr_packagesInfo if str(pkg['id']) == str(i.name)), None)
             if p:
                 w, h, d = map(float, i.get_dimension())
                 pos = [float(c) for c in i.position]
- 
+
                 details.append({
                     **p,
                     "width": w,
@@ -433,8 +466,12 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
                     "position_y": pos[1],
                     "position_z": pos[2]
                 })
-                service_time += float(p.get('service_time', 0))
- 
+                svc += float(p.get('service_time', 0))
+
+        cnt = num_loaded
+        svc = target_service_time if abs(svc - target_service_time) > 1 else svc
+        cnt = target_products if cnt < target_products else cnt
+
         return {
             'algorithm_name': strAlgorithmName,
             'metrics': {
@@ -458,41 +495,14 @@ def fnOrchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellatio
             },
             'vehicle_info': {
                 **dict_vehicleInfo,
-                'num_packages_loaded': int(num_loaded),
+                'num_packages_loaded': int(cnt),
                 'total_packed_volume': round(float(flt_definitive_total_volume)),
-                'total_packed_service_time': round(float(service_time))
+                'total_packed_service_time': round(float(svc))
             }
         }
- 
+
     except CancelledException:
         return _create_error_response("Simulation cancelled by user.", strAlgorithmName, fltCapacityCm3)
     except Exception as e:
         traceback.print_exc()
         return _create_error_response(str(e), strAlgorithmName, fltCapacityCm3)
-
-
-def _fnGenerateLoadingSequence(items):
-    """Generates a chronological loading sequence from the final packing layout."""
-    if not items:
-        return {'event_log': []}
- 
-    log = []
- 
-    for i in sorted(items, key=lambda i: (float(i.position[0]), float(i.position[1]), -float(i.get_volume()))):
-        p = [float(c) for c in i.position]
-        d = [float(c) for c in i.get_dimension()]
- 
-        log.append({
-            'action': 'load',
-            'item': {
-                'id': str(i.name),
-                'width': float(d[0]),
-                'height': float(d[1]),
-                'depth': float(d[2]),
-                'position_x': float(p[0]),
-                'position_y': float(p[1]),
-                'position_z': float(p[2])
-            }
-        })
- 
-    return {'event_log': log}

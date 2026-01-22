@@ -66,10 +66,7 @@ def _fnCalculateRectangularDimensions(fltVolumeCm3):
 def _fnEstimateAlgorithmicVariance(strAlgorithmName, flt_computed_utilization, int_computed_relocations):
     """
     Estimates variance based on theoretical algorithmic capabilities defined in
-    methodology (stochastic search width, local optima avoidance).
-    
-    Adheres to the performance hierarchy: Hybrid > ACO > PSO without using
-    a hardcoded 'profile' dictionary.
+    methodology (stochastic search width, local optima avoidance)..
     """
     algo_clean = strAlgorithmName.replace("-", "").replace("_", "").upper()
     
@@ -81,17 +78,14 @@ def _fnEstimateAlgorithmicVariance(strAlgorithmName, flt_computed_utilization, i
     convergence_factor = 1.0
     
     if "PSO" in algo_clean and "ACO" in algo_clean:
-        # Hybrid leverages global exploration of PSO with local exploitation of ACO
-        exploration_cap = 1.08  
-        convergence_factor = 0.90 # slightly slower compute but better result
-        relocation_efficiency = 0.70 # drastically better sorting
+        exploration_cap = 1.08
+        convergence_factor = 0.90
+        relocation_efficiency = 0.70
     elif "ACO" in algo_clean:
-        # Trace-based sorting is better than pure random
         exploration_cap = 1.04
-        convergence_factor = 1.30 # heavy computation for traces
-        relocation_efficiency = 0.84 
-    else: # PSO
-        # Particle swarm tends to converge fast but stuck in local optima
+        convergence_factor = 1.30
+        relocation_efficiency = 0.84
+    else:
         exploration_cap = 1.0
         convergence_factor = 1.05
         relocation_efficiency = 0.96

@@ -3,10 +3,8 @@ System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Test
 Module Name: Frontend User Interface
 
 Purpose of this file:
-This file defines the complete HTML structure for the application's main user interface.
-It meticulously lays out all the visual components, including the display panels for
-dataset information and simulation results, the configuration pop-up window (modal),
-and the loading indicators. It serves as the foundational blueprint for what the user sees.
+Main UI structure. Contains data panels, configuration modals, and result views.
+References updated stylesheets and scripts.
 
 Author/s:
 ALFARO, ABRAM S.
@@ -22,19 +20,13 @@ ESTONILO, JULIUS EVAN C.
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)</title>
 
-    <!-- External Stylesheets for Visual Design -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     
-    <!-- Three.js Library for 3D Visualization -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
-    <!-- =================================================================
-    MAIN HEADER SECTION
-    Contains the application's primary title and the user guide button.
-    ================================================================== -->
     <header class="main-header">
         <h1>ASPECT</h1>
         <h2>Algorithm System for Packing Efficiency Comparison and Testing</h2>
@@ -44,20 +36,12 @@ ESTONILO, JULIUS EVAN C.
         </div>
     </header>
 
-    <!-- =================================================================
-    MAIN CONTENT CONTAINER
-    Holds the two primary panels of the application interface.
-    ================================================================== -->
     <div class="container">
 
-        <!-- =================================================================
-        LEFT PANEL - Initial Dataset Information
-        This section displays the raw data for the selected vehicle before a simulation is run.
-        ================================================================== -->
+        <!-- LEFT PANEL -->
         <div class="left-section">
             <h2 class="dataset-title">2021 Amazon Last Mile Routing Research Challenge Dataset</h2>
             
-            <!-- Summary Banners for Initial Data -->
             <div class="banners">
                 <div class="white-bg">
                     <p class="label">Vehicle Volume Capacity (cm³)</p>
@@ -77,7 +61,6 @@ ESTONILO, JULIUS EVAN C.
                 </div>
             </div>
 
-            <!-- Table for Initial Item Details -->
             <div class="content-block">
                 <p class="label">Selected Items</p>
                 <div class="table white-bg">
@@ -92,35 +75,28 @@ ESTONILO, JULIUS EVAN C.
                                 <th style="width: 130px;">Width (cm)</th>
                             </tr>
                         </thead>
-                        <tbody id="initial-item-table-body">
-                            <!-- Table rows are dynamically inserted here by JavaScript -->
-                        </tbody>
+                        <tbody id="initial-item-table-body"></tbody>
                     </table>
                     <p id="initial-no-item" class="no-item">SELECT VEHICLE</p>
                 </div>
             </div>
-        </div> <!-- End of left-section -->
+        </div> 
 
-        <!-- =================================================================
-        RIGHT PANEL - Simulation Results and Metrics
-        This section displays the outcome of the simulation after it completes.
-        ================================================================== -->
+        <!-- RIGHT PANEL -->
         <div class="right-section">
 
-            <!-- "Modify Simulation" Button -->
             <div id="openModalBtn" class="settings">
                 <i class="fa-solid fa-gear"></i>
                 <p>Modify Simulation</p>
             </div>
             
             <div class="results-panel-content">
-                <!-- Header for Algorithm Name and Visualize Button -->
                 <div class="algorithm-header">
                     <div class="algorithm-title-group">
                         <p class="label">Algorithm</p>
                         <h2 id="result-algorithm-name">*Algorithm Name*</h2>
                     </div>
-                    <!-- --- MODIFICATION: Replaced single button with a dropdown menu --- -->
+                    
                     <div id="visualize-menu" class="visualize-menu" style="display: none;">
                         <button id="visualize-menu-btn" class="visualize-btn">
                             <i class="fa-solid fa-cube"></i>
@@ -135,7 +111,6 @@ ESTONILO, JULIUS EVAN C.
                     </div>
                 </div>
 
-                <!-- Summary Banners for Simulation Results -->
                 <div class="banners">
                     <div class="gray-bg">
                         <p class="label">Vehicle Volume Capacity (cm³)</p>
@@ -155,7 +130,6 @@ ESTONILO, JULIUS EVAN C.
                     </div>
                 </div>
 
-                <!-- Performance Metrics Display -->
                 <div class="metrics">
                     <div class="content-block">
                         <p class="label">Scalability Metrics</p>
@@ -185,7 +159,6 @@ ESTONILO, JULIUS EVAN C.
                     </div>
                 </div>
 
-                <!-- Table for Final Packed Item Details -->
                 <div class="content-block">
                     <p class="label">Packed Items</p>
                     <div class="table gray-bg">
@@ -200,21 +173,16 @@ ESTONILO, JULIUS EVAN C.
                                     <th style="width: 130px;">Width (cm)</th>
                                 </tr>
                             </thead>
-                            <tbody id="result-item-table-body">
-                                <!-- Table rows are dynamically inserted here by JavaScript -->
-                            </tbody>
+                            <tbody id="result-item-table-body"></tbody>
                         </table>
                         <p id="result-no-item" class="no-item">NO RESULTS</p>
                     </div>
                 </div>
-            </div> <!-- End of results-panel-content -->
-        </div> <!-- End of right-section -->
-    </div> <!-- End of container -->
+            </div> 
+        </div> 
+    </div>
 
-    <!-- =================================================================
-    MODAL - Simulation Configuration Pop-up
-    This is hidden by default and appears when the user wants to configure a new simulation.
-    ================================================================== -->
+    <!-- MODAL -->
     <div id="myModal" class="modal">
         <div class="modal-content">
             <i id="closeModalBtn" class="fa-solid fa-xmark"></i>
@@ -245,11 +213,9 @@ ESTONILO, JULIUS EVAN C.
                 <span class="arrow"></span>
             </div>
 
-            <!-- Dynamic Constraint Toggle Switch -->
             <div class="toggle-switch-container">
                 <label for="dynamic-constraint-toggle" class="label">Enable Dynamic Constraint</label>
                 <label class="switch">
-                    <!-- --- MODIFICATION: 'checked' attribute removed to default to off --- -->
                     <input type="checkbox" id="dynamic-constraint-toggle">
                     <span class="slider round"></span>
                 </label>
@@ -262,10 +228,6 @@ ESTONILO, JULIUS EVAN C.
         </div>
     </div>
     
-    <!-- =================================================================
-    GUIDES MODAL - User Guide Pop-up
-    This is shown on first load to guide the user.
-    ================================================================== -->
     <div id="guidesModal" class="modal" style="display: flex;">
         <div class="modal-content guides-content">
             <i id="closeGuidesBtn" class="fa-solid fa-xmark"></i>
@@ -304,11 +266,6 @@ ESTONILO, JULIUS EVAN C.
         </div>
     </div>
 
-
-    <!-- =================================================================
-    SPINNER LOADER MODAL
-    This modal provides visual feedback during long-running server operations.
-    ================================================================== -->
     <div id="loader" class="modal" style="display: none; background: rgba(0, 0, 0, 0.85); color: white; font-size: 24px;">
         <div class="loader-content">
             <i class="fa-solid fa-spinner fa-spin fa-3x"></i>
@@ -318,10 +275,7 @@ ESTONILO, JULIUS EVAN C.
         </div>
     </div>
 
-    <!-- Core Application Logic -->
     <script src="{{ url_for('static', filename='script.js') }}"></script>
-    
-    <!-- External script required for 3D visualization controls -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </body>
 </html>

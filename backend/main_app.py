@@ -6,11 +6,8 @@ Purpose of this file:
 This file serves as the main entry point and the central nervous system for the
 entire application. It initializes a Flask web server that listens for and responds
 to requests from the user's web browser. Its most critical function is managing
-the execution of long-running, computationally intensive optimization algorithms.
-To prevent the user's browser from timing out or becoming unresponsive during these
-simulations, this module employs a background threading architecture. This design is
-the fundamental solution to the core computing problem of running complex scientific
-simulations within an interactive web environment.
+the execution of long-running, computationally intensive optimization algorithms
+using a background threading architecture.
 
 Author/s:
 ALFARO, ABRAM S.
@@ -19,348 +16,299 @@ DELA CRUZ, JUAN GABRIEL D.
 ERFE, JEFFERSON B.
 ESTONILO, JULIUS EVAN C.
 """
+
 # --- Import necessary libraries ---
-from flask import Flask, render_template, request, jsonify  # Core components for the web server.
-import os        # Used for interacting with the operating system, like finding file paths.
-import sys       # Allows manipulation of Python's runtime environment, like modifying the path.
-import uuid      # Used to generate unique identifiers for each simulation and data-loading job.
-from threading import Thread, Lock # The fundamental tools for running tasks in the background.
+from flask import Flask, render_template, request, jsonify  # Core components for the web server
+import os        # Used for interacting with the operating system
+import sys       # Allows manipulation of Python's runtime environment
+import uuid      # Used to generate unique identifiers
+from threading import Thread, Lock  # Tools for background tasks
 
 
 # --- System Path Configuration ---
-# Add the project's root directory to the Python path.
-# This is a crucial step to ensure that when we try to import our other custom
-# modules (like the data manager or the algorithms), Python knows where to find them.
-g_str_projectRoot = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if g_str_projectRoot not in sys.path:
-    sys.path.insert(0, g_str_projectRoot)
+# Add the project's root directory to the Python path to enable module imports.
+g_strProjectRoot = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
+if g_strProjectRoot not in sys.path:
+    sys.path.insert(0, g_strProjectRoot)
 
 # --- Import Custom Application Modules ---
-# These imports bring in the core logic that our web server will orchestrate.
-# The orchestrator is the "conductor" of the experiment, while the data manager
-# handles the "Sources of Data" part of the research.
-from backend.data_management.data_manager import fnGetAllVehicleCapacities, fnGetDisplayDataForVehicle
-from backend.simulation.simulation_orchestrator import fnOrchestrateSimulationRun
+# Import logic for data management and simulation orchestration.
+from backend.data_management.data_manager import getAllVehicleCapacities, getDisplayDataForVehicle
+from backend.simulation.simulation_orchestrator import orchestrateSimulationRun
 from backend.simulation.custom_exceptions import CancelledException
 
 
 # --- Flask Application Initialization ---
-# This line creates the actual web application instance using the Flask framework.
-# We tell it where to find our HTML templates and static files (CSS, JavaScript).
-g_obj_flaskApp = Flask(__name__, template_folder='../templates', static_folder='../static')
+# Initialize the Flask app with specific folders for templates and static assets.
+g_objFlaskApp = Flask(__name__, template_folder='../templates', static_folder='../static')
 
 
-# --- GLOBAL STATE MANAGEMENT FOR ASYNCHRONOUS OPERATIONS ---
-# To manage tasks running in the background, we need a way for the main server
-# thread to track their status. These global dictionaries act as a "job board."
-# Each dictionary is protected by a "Lock" to prevent a serious issue called a
-# "race condition," where two threads might try to write to the same spot in memory
-# at the exact same time, leading to corrupted data. The Lock ensures that only
-# one thread can access the dictionary at any given moment.
+# --- GLOBAL STATE MANAGEMENT ---
+# Dictionaries acting as "job boards" for async tasks, protected by Locks to prevent race conditions.
+g_dictRunningSimulations = {}
+g_objSimulationLock = Lock()
 
-# This dictionary holds the status and results of every simulation run.
-g_dict_runningSimulations = {}
-g_obj_simulationLock = Lock() # A digital "talking stick" to ensure orderly access to the dictionary.
-
-# This dictionary tracks the status of dataset loading and preprocessing jobs.
-g_dict_runningDataLoads = {}
-g_obj_dataLoadLock = Lock()
+g_dictRunningDataLoads = {}
+g_objDataLoadLock = Lock()
 
 
-def _fnExecuteSimulationInThread(strSimulationId, strAlgorithmName, fltCapacityCm3, blnIsDynamicConstraintEnabled):
+
+def _executeSimulationInThread(strSimulationId, strAlgorithmName, fltCapacityCm3, blnIsDynamicConstraintEnabled):
     """
-    This is the function that a background thread will execute when a simulation is started.
-    By placing the heavy computational work of the optimization algorithm here, we free up
-    the main web server to continue responding to the user. This is what allows the loading
-    spinner on the screen to animate smoothly and for the "Cancel" button to work, even
-    while the server is deep in complex calculations.
-
-    Args:
-        strSimulationId (str): The unique ID for this specific simulation run.
-        strAlgorithmName (str): The name of the algorithm to run (e.g., 'PSO').
-        fltCapacityCm3 (float): The vehicle capacity selected by the user.
-        blnIsDynamicConstraintEnabled (bool): A flag indicating if the dynamic constraint should be applied.
+    Executes the optimization algorithm in a background thread.
+    This prevents blocking the main web server loop.
     """
-    global g_dict_runningSimulations
+    global g_dictRunningSimulations
 
     try:
-        # Retrieve the shared "control panel" dictionaries for this specific job.
-        # These were created in the main thread and are shared with this background thread.
-        # This is how the main thread can "signal" this thread to cancel.
-        dict_cancellationFlag = g_dict_runningSimulations[strSimulationId]['cancellation_flag']
-        dict_progressTracker = g_dict_runningSimulations[strSimulationId]['progress'] # For real-time UI updates.
+        # Retrieve control objects (cancellation flag, progress tracker) shared with the main thread.
+        dictCancellationFlag = g_dictRunningSimulations[strSimulationId]['cancellation_flag']
+        dictProgressTracker = g_dictRunningSimulations[strSimulationId]['progress']
 
-        # Delegate the entire complex logic of the experiment to the simulation orchestrator module.
-        # This keeps our main application file clean and focused on web-related tasks.
-        dict_results = fnOrchestrateSimulationRun(
+        # Delegate execution to the orchestration module.
+        dictResults = orchestrateSimulationRun(
             strAlgorithmName,
             fltCapacityCm3,
-            dict_cancellationFlag,
+            dictCancellationFlag,
             blnIsDynamicConstraintEnabled,
-            dict_progressTracker # Pass the progress tracker down into the core simulation logic.
+            dictProgressTracker
         )
 
-        # Once the simulation is complete, we must safely update the global job board.
-        # We acquire the lock to ensure no other thread interferes while we write the result.
-        with g_obj_simulationLock:
-            # A final check: Did the user click "Cancel" right as the simulation finished?
-            # This handles that edge case to ensure the final status is 'cancelled'.
-            if g_dict_runningSimulations[strSimulationId]['status'] == "cancelling":
-                g_dict_runningSimulations[strSimulationId]['status'] = 'cancelled'
-                g_dict_runningSimulations[strSimulationId]['result'] = None
+        # Securely update the global state with results.
+        with g_objSimulationLock:
+            # Check for edge-case cancellation during completion.
+            if g_dictRunningSimulations[strSimulationId]['status'] == "cancelling":
+                g_dictRunningSimulations[strSimulationId]['status'] = 'cancelled'
+                g_dictRunningSimulations[strSimulationId]['result'] = None
             else:
-                # If not cancelled, we mark it as completed and store the valuable results.
-                g_dict_runningSimulations[strSimulationId]['status'] = 'completed'
-                g_dict_runningSimulations[strSimulationId]['result'] = dict_results
+                g_dictRunningSimulations[strSimulationId]['status'] = 'completed'
+                g_dictRunningSimulations[strSimulationId]['result'] = dictResults
 
     except CancelledException:
-        # This block catches the special exception raised when the algorithm
-        # detects that the cancellation flag has been set. It's a clean way to exit gracefully.
-        with g_obj_simulationLock:
-            g_dict_runningSimulations[strSimulationId]['status'] = 'cancelled'
+        # Handle graceful cancellation request.
+        with g_objSimulationLock:
+            g_dictRunningSimulations[strSimulationId]['status'] = 'cancelled'
             print(f"Simulation {strSimulationId} cancelled successfully.")
 
-    except Exception as obj_err:
-        # A catch-all for any other unexpected errors during the simulation.
-        # This ensures the application doesn't crash and can report the error to the user.
-        print(f"Error in simulation thread {strSimulationId}: {obj_err}")
-        with g_obj_simulationLock:
-            g_dict_runningSimulations[strSimulationId]['status'] = 'error'
-            g_dict_runningSimulations[strSimulationId]['result'] = {'error': str(obj_err)}
+    except Exception as objErr:
+        # Catch-all for unexpected failures.
+        print(f"Error in simulation thread {strSimulationId}: {objErr}")
+        with g_objSimulationLock:
+            g_dictRunningSimulations[strSimulationId]['status'] = 'error'
+            g_dictRunningSimulations[strSimulationId]['result'] = {'error': str(objErr)}
+
+# end of _executeSimulationInThread
 
 
-def _fnExecuteDataLoadingInThread(strLoadId, fltCapacityCm3):
+def _executeDataLoadingInThread(strLoadId, fltCapacityCm3):
     """
-    Runs the data loading and preprocessing in a separate background thread.
-    While not as long as a simulation, parsing the very large Amazon dataset can still
-    be slow enough to make the user interface feel sluggish. This function prevents that.
-
-    Args:
-        strLoadId (str): The unique ID for this data loading job.
-        fltCapacityCm3 (float): The capacity to filter the dataset by.
+    Runs the dataset parsing and caching in a separate thread.
+    This prevents UI freezes during large file I/O operations.
     """
-    global g_dict_runningDataLoads
+    global g_dictRunningDataLoads
+
     try:
-        # Get the cancellation flag for this job.
-        dict_cancellationFlag = g_dict_runningDataLoads[strLoadId]['cancellation_flag']
+        dictCancellationFlag = g_dictRunningDataLoads[strLoadId]['cancellation_flag']
 
-        # Delegate the task of reading and preparing the data to the data manager module.
-        dict_vehicleInfo, arr_packagesInfo = fnGetDisplayDataForVehicle(fltCapacityCm3, dict_cancellationFlag)
+        # Call data manager to prepare the route.
+        dictVehicleInfo, arrPackagesInfo = getDisplayDataForVehicle(fltCapacityCm3, dictCancellationFlag)
 
-        # Safely update the shared job board with the loaded data.
-        with g_obj_dataLoadLock:
-            if g_dict_runningDataLoads[strLoadId]['status'] == "cancelling":
-                g_dict_runningDataLoads[strLoadId]['status'] = 'cancelled'
-            elif not dict_vehicleInfo:
-                 g_dict_runningDataLoads[strLoadId]['status'] = 'error'
-                 g_dict_runningDataLoads[strLoadId]['result'] = {'error': 'Could not find a valid sample route for the specified capacity.'}
+        # Securely update the status.
+        with g_objDataLoadLock:
+            if g_dictRunningDataLoads[strLoadId]['status'] == "cancelling":
+                g_dictRunningDataLoads[strLoadId]['status'] = 'cancelled'
+            elif not dictVehicleInfo:
+                g_dictRunningDataLoads[strLoadId]['status'] = 'error'
+                g_dictRunningDataLoads[strLoadId]['result'] = {'error': 'Could not find a valid sample route for the specified capacity.'}
             else:
-                g_dict_runningDataLoads[strLoadId]['status'] = 'completed'
-                g_dict_runningDataLoads[strLoadId]['result'] = {
-                    'vehicle': dict_vehicleInfo,
-                    'packages': arr_packagesInfo
+                g_dictRunningDataLoads[strLoadId]['status'] = 'completed'
+                g_dictRunningDataLoads[strLoadId]['result'] = {
+                    'vehicle': dictVehicleInfo,
+                    'packages': arrPackagesInfo
                 }
 
     except CancelledException:
-         # Handle a graceful cancellation.
-         with g_obj_dataLoadLock:
-            g_dict_runningDataLoads[strLoadId]['status'] = 'cancelled'
+        with g_objDataLoadLock:
+            g_dictRunningDataLoads[strLoadId]['status'] = 'cancelled'
             print(f"Data loading job {strLoadId} cancelled successfully.")
 
-    except Exception as obj_err:
-        # Handle any unexpected errors.
-        with g_obj_dataLoadLock:
-            g_dict_runningDataLoads[strLoadId]['status'] = 'error'
-            g_dict_runningDataLoads[strLoadId]['result'] = {'error': str(obj_err)}
+    except Exception as objErr:
+        with g_objDataLoadLock:
+            g_dictRunningDataLoads[strLoadId]['status'] = 'error'
+            g_dictRunningDataLoads[strLoadId]['result'] = {'error': str(objErr)}
+
+# end of _executeDataLoadingInThread
 
 
 # --- WEB SERVER ROUTE DEFINITIONS ---
-# These blocks of code define the different "pages" or API "endpoints" of our web application.
-# The `@g_obj_flaskApp.route(...)` is a special instruction (a "decorator") that tells Flask:
-# "When a web browser asks for THIS specific URL, run the function right below me."
 
-@g_obj_flaskApp.route('/')
-def fnHandleIndexPageRequest():
+@g_objFlaskApp.route('/')
+def handleIndexPageRequest():
     """
-    This function handles requests for the main page of the application (the root URL).
-    It renders the primary HTML file, `index.html`, which serves as the user interface.
-    The initial page is rendered quickly with an empty list of vehicle capacities, which
-    are then fetched separately by the frontend JavaScript. This improves perceived load time.
+    Serves the main HTML interface.
     """
     return render_template('index.html', capacities=[])
 
+# end of handleIndexPageRequest
 
-@g_obj_flaskApp.route('/get_all_capacities', methods=['GET'])
-def fnHandleGetAllCapacitiesRequest():
+
+@g_objFlaskApp.route('/get_all_capacities', methods=['GET'])
+def handleGetAllCapacitiesRequest():
     """
-    Provides a dedicated API endpoint for the slow task of reading the dataset to find
-    all unique vehicle capacities. By isolating this operation, we prevent it from
-    blocking the rendering of the main application page, making the UI appear much faster.
+    API endpoint to fetch distinct vehicle capacities from the dataset.
     """
     try:
-        arr_capacities = fnGetAllVehicleCapacities()
-        # jsonify is a Flask helper that correctly formats our Python list into JSON for the web browser.
-        return jsonify({'capacities': arr_capacities})
-    except Exception as obj_err:
-        print(f"Error in /get_all_capacities: {obj_err}")
-        return jsonify({'error': str(obj_err)}), 500 # Return an error code.
+        arrCapacities = getAllVehicleCapacities()
+        return jsonify({'capacities': arrCapacities})
+    except Exception as objErr:
+        print(f"Error in /get_all_capacities: {objErr}")
+        return jsonify({'error': str(objErr)}), 500
+
+# end of handleGetAllCapacitiesRequest
 
 
-@g_obj_flaskApp.route('/start_data_loading', methods=['POST'])
-def fnHandleStartDataLoadingRequest():
+@g_objFlaskApp.route('/start_data_loading', methods=['POST'])
+def handleStartDataLoadingRequest():
     """
-    This endpoint is called by the frontend JavaScript when the user selects a vehicle.
-    Its job is to kick off the background data-loading process. It does NOT wait for the
-    process to finish. Instead, it immediately returns a unique job ID. The frontend can then
-    use this ID to ask for status updates separately. This is a core part of the asynchronous design.
+    Starts an async job to load dataset info for a selected capacity.
     """
-    global g_dict_runningDataLoads
+    global g_dictRunningDataLoads
 
-    obj_data = request.get_json()  # Get the data sent from the browser (the selected capacity).
-    flt_capacityCm3 = float(obj_data.get('capacity'))
-    str_loadId = str(uuid.uuid4()) # Generate a new, unique ID for this job.
+    objData = request.get_json()
+    fltCapacityCm3 = float(objData.get('capacity'))
+    strLoadId = str(uuid.uuid4())
 
-    # This is the "control flag." It's a dictionary so it can be passed by reference,
-    # meaning if the main thread changes `is_cancelled` to True, the background thread sees that change instantly.
-    dict_cancellationFlag = {'is_cancelled': False}
-    # Create a new Thread object, telling it which function to run and what arguments to give it.
-    obj_thread = Thread(target=_fnExecuteDataLoadingInThread, args=(str_loadId, flt_capacityCm3))
+    dictCancellationFlag = {'is_cancelled': False}
+    objThread = Thread(target=_executeDataLoadingInThread, args=(strLoadId, fltCapacityCm3))
 
-    # Add this new job to our global "job board" dictionary.
-    with g_obj_dataLoadLock:
-        g_dict_runningDataLoads[str_loadId] = {
-            'thread': obj_thread,
+    with g_objDataLoadLock:
+        g_dictRunningDataLoads[strLoadId] = {
+            'thread': objThread,
             'status': 'running',
             'result': None,
-            'cancellation_flag': dict_cancellationFlag
+            'cancellation_flag': dictCancellationFlag
         }
 
-    obj_thread.start() # Start the background job.
-    return jsonify({'status': 'started', 'load_id': str_loadId}) # Immediately reply to the browser.
+    objThread.start()
+    return jsonify({'status': 'started', 'load_id': strLoadId})
+
+# end of handleStartDataLoadingRequest
 
 
-@g_obj_flaskApp.route('/data_loading_status/<string:strLoadId>')
-def fnHandleDataLoadingStatusRequest(strLoadId):
+@g_objFlaskApp.route('/data_loading_status/<string:strLoadId>')
+def handleDataLoadingStatusRequest(strLoadId):
     """
-    An API endpoint that allows the client to periodically "poll" (ask for updates)
-    about a running data loading job using its unique ID.
+    Polls the status of a specific data loading job.
     """
-    with g_obj_dataLoadLock:
-        dict_job = g_dict_runningDataLoads.get(strLoadId)
-        if not dict_job:
+    with g_objDataLoadLock:
+        dictJob = g_dictRunningDataLoads.get(strLoadId)
+        if not dictJob:
             return jsonify({'status': 'not_found'}), 404
-        # Return the current status and the result if it's completed or has an error.
-        return jsonify({'status': dict_job['status'], 'result': dict_job['result']})
+        
+        return jsonify({'status': dictJob['status'], 'result': dictJob['result']})
+
+# end of handleDataLoadingStatusRequest
 
 
-@g_obj_flaskApp.route('/cancel_data_loading/<string:strLoadId>', methods=['POST'])
-def fnHandleCancelDataLoadingRequest(strLoadId):
+@g_objFlaskApp.route('/cancel_data_loading/<string:strLoadId>', methods=['POST'])
+def handleCancelDataLoadingRequest(strLoadId):
     """
-    An endpoint to request the cancellation of a running data loading job.
-    It works by simply setting the shared `is_cancelled` flag to True. The background
-    thread is designed to check this flag periodically and exit gracefully if it sees the change.
+    Signals a running data load job to terminate.
     """
-    with g_obj_dataLoadLock:
-        dict_job = g_dict_runningDataLoads.get(strLoadId)
-        if dict_job and dict_job['status'] == 'running':
+    with g_objDataLoadLock:
+        dictJob = g_dictRunningDataLoads.get(strLoadId)
+        if dictJob and dictJob['status'] == 'running':
             print(f"Received cancel request for data loading job: {strLoadId}")
-            # This is the signal. Setting this to True tells the thread to stop.
-            dict_job['cancellation_flag']['is_cancelled'] = True
-            dict_job['status'] = 'cancelling'
+            dictJob['cancellation_flag']['is_cancelled'] = True
+            dictJob['status'] = 'cancelling'
             return jsonify({'status': 'cancellation_requested'})
         else:
             return jsonify({'status': 'not_found_or_already_complete'}), 404
 
+# end of handleCancelDataLoadingRequest
 
-@g_obj_flaskApp.route('/start_simulation', methods=['POST'])
-def fnHandleStartSimulationRequest():
+
+@g_objFlaskApp.route('/start_simulation', methods=['POST'])
+def handleStartSimulationRequest():
     """
-    The endpoint called by the "Simulate" button. Much like the data loading endpoint,
-    this kicks off the heavy simulation work in a background thread and immediately
-    returns a unique simulation ID to the frontend for status polling.
+    Initiates a simulation run with specified parameters.
     """
-    global g_dict_runningSimulations
+    global g_dictRunningSimulations
 
-    # Get simulation parameters from the user's request.
-    obj_data = request.get_json()
-    str_algorithmName = obj_data.get('algorithm')
-    flt_capacityCm3 = float(obj_data.get('capacity'))
-    bln_isDynamicConstraintEnabled = obj_data.get('dynamic_constraint_enabled', True)
-    str_simulationId = str(uuid.uuid4())
+    objData = request.get_json()
+    strAlgorithmName = objData.get('algorithm')
+    fltCapacityCm3 = float(objData.get('capacity'))
+    blnIsDynamicConstraintEnabled = objData.get('dynamic_constraint_enabled', True)
+    strSimulationId = str(uuid.uuid4())
 
-    # Create the mutable dictionaries that will be shared between the main and background threads.
-    # The progress tracker will be updated by the algorithm with its current generation number.
-    dict_progressTracker = {'current': 0, 'total': 0, 'message': 'Initializing...'}
-    dict_cancellationFlag = {'is_cancelled': False}
+    # Shared mutable state objects for the thread.
+    dictProgressTracker = {'current': 0, 'total': 0, 'message': 'Initializing...'}
+    dictCancellationFlag = {'is_cancelled': False}
 
-    # Set up the new thread for the simulation.
-    obj_thread = Thread(
-        target=_fnExecuteSimulationInThread,
-        args=(str_simulationId, str_algorithmName, flt_capacityCm3, bln_isDynamicConstraintEnabled)
+    objThread = Thread(
+        target=_executeSimulationInThread,
+        args=(strSimulationId, strAlgorithmName, fltCapacityCm3, blnIsDynamicConstraintEnabled)
     )
 
-    # Add the job to the "job board."
-    with g_obj_simulationLock:
-        g_dict_runningSimulations[str_simulationId] = {
-            'thread': obj_thread,
+    with g_objSimulationLock:
+        g_dictRunningSimulations[strSimulationId] = {
+            'thread': objThread,
             'status': 'running',
             'result': None,
-            'cancellation_flag': dict_cancellationFlag,
-            'progress': dict_progressTracker # Add the progress tracker to the job's entry.
+            'cancellation_flag': dictCancellationFlag,
+            'progress': dictProgressTracker
         }
 
-    obj_thread.start() # Start the simulation.
-    print(f"Started simulation with ID: {str_simulationId}")
-    return jsonify({'status': 'started', 'simulation_id': str_simulationId})
+    objThread.start()
+    print(f"Started simulation with ID: {strSimulationId}")
+    return jsonify({'status': 'started', 'simulation_id': strSimulationId})
+
+# end of handleStartSimulationRequest
 
 
-@g_obj_flaskApp.route('/simulation_status/<string:strSimulationId>')
-def fnHandleSimulationStatusRequest(strSimulationId):
+@g_objFlaskApp.route('/simulation_status/<string:strSimulationId>')
+def handleSimulationStatusRequest(strSimulationId):
     """
-    An API endpoint that allows the client to poll for the status and progress of a
-    running simulation, which is used to update the loading spinner's text.
+    Polls for real-time progress of a simulation.
     """
-    with g_obj_simulationLock:
-        dict_sim = g_dict_runningSimulations.get(strSimulationId)
-        if not dict_sim:
+    with g_objSimulationLock:
+        dictSim = g_dictRunningSimulations.get(strSimulationId)
+        if not dictSim:
             return jsonify({'status': 'not_found'}), 404
         
-        # We don't delete the job entry after completion. This prevents a race condition where the client
-        # might poll for the final result at the exact moment the job finishes, and miss it.
-        # The frontend is responsible for fetching the final result one last time after seeing the 'completed' status.
         return jsonify({
-            'status': dict_sim['status'],
-            'result': dict_sim['result'],
-            'progress': dict_sim.get('progress', {}) # The 'progress' dictionary is included in the response.
+            'status': dictSim['status'],
+            'result': dictSim['result'],
+            'progress': dictSim.get('progress', {})
         })
 
+# end of handleSimulationStatusRequest
 
-@g_obj_flaskApp.route('/cancel_simulation/<string:strSimulationId>', methods=['POST'])
-def fnHandleCancelSimulationRequest(strSimulationId):
+
+@g_objFlaskApp.route('/cancel_simulation/<string:strSimulationId>', methods=['POST'])
+def handleCancelSimulationRequest(strSimulationId):
     """
-    An API endpoint to request the cancellation of a running simulation by setting
-    the shared cancellation flag to True.
+    Signals a simulation thread to stop execution via the shared flag.
     """
-    with g_obj_simulationLock:
-        dict_sim = g_dict_runningSimulations.get(strSimulationId)
-        if dict_sim and dict_sim['status'] == 'running':
+    with g_objSimulationLock:
+        dictSim = g_dictRunningSimulations.get(strSimulationId)
+        if dictSim and dictSim['status'] == 'running':
             print(f"Received cancel request for simulation ID: {strSimulationId}")
-            dict_sim['cancellation_flag']['is_cancelled'] = True
-            dict_sim['status'] = 'cancelling'
+            dictSim['cancellation_flag']['is_cancelled'] = True
+            dictSim['status'] = 'cancelling'
             return jsonify({'status': 'cancellation_requested'})
-        elif dict_sim:
-            # The job has already finished or been cancelled.
+        elif dictSim:
             return jsonify({'status': 'already_complete'}), 404
         else:
             return jsonify({'status': 'not_found'}), 404
 
+# end of handleCancelSimulationRequest
+
 
 # --- Application Entry Point ---
-# This special block of code checks if the script is being run directly.
-# If it is, it starts the Flask development server.
 if __name__ == '__main__':
-    # Starts the web server. `threaded=True` is absolutely essential. It allows Flask
-    # to handle multiple requests simultaneously, such as a user clicking "Cancel"
-    # while a background thread is running and the frontend is polling for status.
-    g_obj_flaskApp.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+    # Threading is enabled to allow concurrent request handling (polling while processing).
+    g_objFlaskApp.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+
+# end of main block

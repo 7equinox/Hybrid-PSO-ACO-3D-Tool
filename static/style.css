@@ -1,12 +1,10 @@
 /*
 System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
-Module Name: Frontend User Interface Styles
+Module Name: Frontend Styles
 
 Purpose of this file:
-Provides all the Cascading Style Sheets (CSS) to define the visual appearance of
-the application. This includes rules for layout (flexbox, grid), typography
-(fonts, sizes, colors), and the specific styling for all interactive components
-like modals, buttons, tables, and custom dropdown menus.
+Cascading Style Sheets determining the layout, fonts, and responsive behavior.
+Strictly adheres to styling components described in requirements.
 
 Author/s:
 ALFARO, ABRAM S.
@@ -16,9 +14,6 @@ ERFE, JEFFERSON B.
 ESTONILO, JULIUS EVAN C.
 */
 
-/* ==========================================================================
-   1. Google Fonts Import & Global Resets
-   ========================================================================== */
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700&display=swap');
 
 * {
@@ -28,10 +23,6 @@ ESTONILO, JULIUS EVAN C.
     padding: 0;
 }
 
-
-/* ==========================================================================
-   2. Base Typography & Body Styles
-   ========================================================================== */
 body {
     background-color: #f5f5f5;
 }
@@ -50,10 +41,6 @@ h3 {
     color: #e08128;
 }
 
-
-/* ==========================================================================
-   3. Main Layout & Section Styling
-   ========================================================================== */
 .main-header {
     background-color: #121212;
     color: white;
@@ -77,14 +64,14 @@ h3 {
     display: flex;
     margin: 30px auto; 
     max-width: 1350px;
-    width: 100%; /* Changed from fit-content for better responsiveness */
-    padding: 0 15px; /* Add some padding on the sides */
+    width: 100%;
+    padding: 0 15px;
 }
 
 .left-section {
     flex: 1;
     padding: 15px 30px 0 30px;
-    min-width: 300px; /* Prevents sections from getting too squished */
+    min-width: 300px;
 }
 
 .right-section {
@@ -94,7 +81,7 @@ h3 {
     flex: 1;
     padding: 30px;
     position: relative; 
-    min-width: 300px; /* Prevents sections from getting too squished */
+    min-width: 300px;
 }
 
 .dataset-title {
@@ -118,10 +105,6 @@ h3 {
     font-size: 28px;
 }
 
-
-/* ==========================================================================
-   4. Component Styles: Banners, Backgrounds, and Metrics
-   ========================================================================== */
 .banners {
     display: grid;
     gap: 20px;
@@ -162,10 +145,6 @@ h3 {
     justify-content: space-between;
 }
 
-
-/* ==========================================================================
-   5. Component Styles: Buttons & Interactive Elements
-   ========================================================================== */
 .settings {
     align-items: center;
     background-color: #343434;
@@ -204,7 +183,6 @@ h3 {
     color: #e08128;
 }
 
-/* --- MODIFICATION: Styling for the new visualize dropdown menu --- */
 .visualize-menu {
     position: relative;
     display: inline-block;
@@ -250,7 +228,7 @@ h3 {
     z-index: 1;
     border-radius: 5px;
     overflow: hidden;
-    right: 0; /* Align dropdown to the right */
+    right: 0;
 }
 
 .visualize-dropdown-content a {
@@ -267,18 +245,13 @@ h3 {
     display: block;
 }
 
-
-/* ==========================================================================
-   6. Component Styles: Tables
-   ========================================================================== */
 .table {
     margin-top: 10px;
     max-height: 725px;
-    /* max-width is handled in media queries */
     min-height: 389px;
     overflow: auto;
     position: relative;
-    width: 100%; /* Ensure it fills its container */
+    width: 100%;
 }
 
 .no-item {
@@ -289,7 +262,7 @@ h3 {
     position: absolute;
     text-align: center;
     width: 100%;
-    left: 0; /* Ensure it is centered properly */
+    left: 0;
 }
 
 .custom-table {
@@ -297,7 +270,7 @@ h3 {
     border-collapse: collapse;
     table-layout: fixed;
     width: 100%;
-    min-width: 970px; /* Force table to be wide to enable scrolling */
+    min-width: 970px;
 }
 
 th {
@@ -321,10 +294,6 @@ td:not(:first-child) {
 .custom-table th:last-child, .custom-table td:last-child { border-right: none; }
 .custom-table.gray-border th, .custom-table.gray-border td { border-color: #f5f5f5; }
 
-
-/* ==========================================================================
-   7. Component Styles: Modals (Pop-up Windows)
-   ========================================================================== */
 .modal {
     align-items: center;
     background: rgba(0, 0, 0, 0.7);
@@ -336,7 +305,7 @@ td:not(:first-child) {
     top: 0;
     width: 100%;
     z-index: 1000;
-    padding: 15px; /* Add padding for small screens */
+    padding: 15px;
 }
 
 .modal-content {
@@ -349,7 +318,7 @@ td:not(:first-child) {
     position: relative;
     width: fit-content;
     animation: fadeIn 0.3s ease-out;
-    max-width: 100%; /* Prevent modal from exceeding screen width */
+    max-width: 100%;
 }
 
 .modal-content i.fa-xmark {
@@ -367,10 +336,6 @@ td:not(:first-child) {
     to { opacity: 1; transform: translateY(0); }
 }
 
-
-/* ==========================================================================
-   8. Modal Content: Options, Selects, and Buttons
-   ========================================================================== */
 .modal-options {
     display: grid;
     gap: 20px;
@@ -492,10 +457,6 @@ select.currency-select option:hover {
     background-color: #e0e0e0;
 }
 
-
-/* ==========================================================================
-   9. Component Styles: Dynamic Constraint Toggle Switch
-   ========================================================================== */
 .toggle-switch-container {
     display: flex;
     justify-content: space-between;
@@ -511,7 +472,7 @@ select.currency-select option:hover {
     display: inline-block;
     width: 60px;
     height: 34px;
-    flex-shrink: 0; /* Prevents the switch from shrinking */
+    flex-shrink: 0;
 }
 .switch input { 
     opacity: 0;
@@ -558,16 +519,12 @@ input:checked + .slider:before {
     border-radius: 50%;
 }
 
-
-/* ==========================================================================
-   10. Component Styles: User Guides Modal
-   ========================================================================== */
 .guides-content {
     max-width: 1200px;
     text-align: left;
     font-size: 0.8rem;
-    overflow-y: auto; /* Allow scrolling on small screens */
-    max-height: 90vh; /* Prevent modal from being taller than screen */
+    overflow-y: auto;
+    max-height: 90vh;
 }
 .guides-content h2 {
     text-align: center;
@@ -613,10 +570,6 @@ input:checked + .slider:before {
     font-weight: 500;
 }
 
-
-/* ==========================================================================
-   11. Utility Styles: Loader and Custom Scrollbars
-   ========================================================================== */
 .loader-content {
     display: flex;
     flex-direction: column;
@@ -630,12 +583,6 @@ input:checked + .slider:before {
 .table.gray-bg::-webkit-scrollbar-track { background-color: #252525; }
 .table.gray-bg::-webkit-scrollbar-thumb { background-color: #f5f5f5; }
 
-
-/* ==========================================================================
-   12. Responsive Media Queries
-   ========================================================================== */
-
-/* For tablets and smaller desktops */
 @media (max-width: 1280px) {
     .container {
         flex-direction: column;
@@ -644,13 +591,12 @@ input:checked + .slider:before {
     }
     .left-section, .right-section {
         width: 100%;
-        max-width: 700px; /* Give a max width for tablet view */
+        max-width: 700px;
         padding-left: 15px;
         padding-right: 15px;
     }
 }
 
-/* For mobile phones */
 @media (max-width: 768px) {
     .main-header {
         padding: 15px;
@@ -664,26 +610,26 @@ input:checked + .slider:before {
         padding: 0 10px;
     }
     .guides-btn {
-        position: static; /* Unfix from the side */
+        position: static;
         transform: none;
-        margin: 15px auto 0 auto; /* Center it below titles */
+        margin: 15px auto 0 auto;
         width: fit-content;
     }
     
     .banners {
-        grid-template-columns: 1fr; /* Stack banners vertically */
+        grid-template-columns: 1fr;
     }
 
     .modal-options {
-        grid-template-columns: 1fr; /* Stack algorithm buttons */
+        grid-template-columns: 1fr;
     }
     .modal-options button {
-        width: 100%; /* Make buttons full-width */
+        width: 100%;
         font-size: 20px;
     }
 
     .simulation-btn {
-        flex-direction: column; /* Stack simulation buttons */
+        flex-direction: column;
     }
     .simulation-btn button {
         width: 100%;
@@ -700,7 +646,7 @@ input:checked + .slider:before {
     }
     
     .left-section, .right-section {
-        max-width: none; /* Allow full width on mobile */
+        max-width: none;
     }
 
     .toggle-switch-container .label {

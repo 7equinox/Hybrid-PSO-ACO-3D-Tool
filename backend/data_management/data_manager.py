@@ -3,17 +3,9 @@ System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Test
 Module Name: Data Management
 
 Purpose of this file:
-This module is the direct implementation of the 'Sources of Data' and 'Dataset
-Preparation' stages outlined in the research methodology. It is singularly
-responsible for all interactions with the raw 2021 Amazon Last Mile Routing
-Research Challenge Dataset. Its primary functions are to:
-1. Load the massive, complex JSON source files.
-2. Preprocess and sanitize the data to create clean, usable problem instances.
-3. Implement an intelligent caching strategy to dramatically speed up subsequent
-   data loads, which is critical for making the research tool practical for
-   repeated experiments.
-This module provides the foundational, reliable data upon which all experiments
-and simulations are built.
+This module handles all interactions with the raw 2021 Amazon Last Mile Routing
+Research Challenge Dataset. It implements loading, preprocessing, and caching of
+large JSON files to create valid problem instances for simulation.
 
 Author/s:
 ALFARO, ABRAM S.
@@ -22,243 +14,215 @@ DELA CRUZ, JUAN GABRIEL D.
 ERFE, JEFFERSON B.
 ESTONILO, JULIUS EVAN C.
 """
+
 # --- Import necessary libraries ---
-import json     # For reading and writing JSON files (the format of our dataset).
-import os       # For interacting with the file system (e.g., finding paths, creating directories).
-import pandas as pd # A powerful library for handling large, structured datasets efficiently.
-import math     # For mathematical operations, like calculating cube roots for dimensions.
-import gc       # Python's "Garbage Collector" interface, used here to manually free up memory.
-from backend.simulation.custom_exceptions import CancelledException # Our custom exception for graceful cancellation.
+import json
+import os
+import pandas as pd
+import math
+import gc
+from backend.simulation.custom_exceptions import CancelledException
 
 
 # --- GLOBAL CONSTANTS ---
-# Define the file paths for the dataset. Using global constants makes the code
-# cleaner and easier to update if the file locations ever change.
-g_str_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+G_STR_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+G_STR_ROUTE_DATA_PATH = os.path.join(G_STR_BASE_DIR, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_route_data.json')
+G_STR_PACKAGE_DATA_PATH = os.path.join(G_STR_BASE_DIR, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_package_data.json')
+G_STR_DATA_CACHE_DIR = os.path.join(G_STR_BASE_DIR, '../', 'data_cache')
 
-# These paths point to the large, official dataset files as specified in the 'Sources of Data'.
-g_str_ROUTE_DATA_PATH = os.path.join(g_str_BASE_DIR, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_route_data.json')
-g_str_PACKAGE_DATA_PATH = os.path.join(g_str_BASE_DIR, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_package_data.json')
+# Ensure cache directory exists
+os.makedirs(G_STR_DATA_CACHE_DIR, exist_ok=True)
 
-# The cache is a "smart storage" folder. We will store pre-processed data here
-# to avoid re-reading the massive source files every time the application is used.
-# This is a critical performance optimization.
-g_str_DATA_CACHE_DIR = os.path.join(g_str_BASE_DIR, '../', 'data_cache')
-os.makedirs(g_str_DATA_CACHE_DIR, exist_ok=True) # Create the directory if it doesn't exist.
-
-# A default object for the cancellation flag. This allows functions to be called
-# in different contexts without always needing to pass a flag.
+# Default flag for optional arguments
 DEFAULT_CANCEL_FLAG = {'is_cancelled': False}
 
 
-def _fnLoadSourceDataset(dictCancellationFlag=DEFAULT_CANCEL_FLAG):
+def _loadSourceDataset(dictCancellationFlag=DEFAULT_CANCEL_FLAG):
     """
-    Loads the large raw JSON files from the Amazon dataset into memory using the pandas library.
-    Because this is a very time-consuming operation (it can take several seconds), it
-    is designed to be interruptible. The function checks the cancellation flag before
-    and between reading the large files, allowing the user to abort the process.
-
-    Args:
-        dictCancellationFlag (dict): The shared flag that signals when to stop.
-
-    Returns:
-        tuple: A pandas DataFrame with route data and a dictionary with package data.
+    Loads raw JSON files into memory. 
+    Checks cancellation flag between heavy I/O operations.
     """
-    # Check for a cancellation signal before starting the slow file-reading process.
-    if dictCancellationFlag['is_cancelled']: raise CancelledException()
+    if dictCancellationFlag['is_cancelled']:
+        raise CancelledException()
 
     print("Loading large route JSON file into memory...")
-    # Open and parse the route data file.
-    with open(g_str_ROUTE_DATA_PATH, 'r') as f:
-        # Using pandas is much more memory-efficient than loading the whole JSON object at once.
-        obj_dfRouteData = pd.DataFrame.from_dict(json.load(f), orient='index')
+    
+    with open(G_STR_ROUTE_DATA_PATH, 'r') as fileObject:
+        objRouteDataFrame = pd.DataFrame.from_dict(json.load(fileObject), orient='index')
 
-    # Check for cancellation again before reading the second large file.
-    if dictCancellationFlag['is_cancelled']: raise CancelledException()
+    if dictCancellationFlag['is_cancelled']:
+        raise CancelledException()
 
     print("Loading large package JSON file into memory...")
-    # Open and parse the package data file.
-    with open(g_str_PACKAGE_DATA_PATH, 'r') as f:
-        dict_packageData = json.load(f)
+    
+    with open(G_STR_PACKAGE_DATA_PATH, 'r') as fileObject:
+        dictPackageData = json.load(fileObject)
 
     print("Finished loading large JSON files.")
-    return obj_dfRouteData, dict_packageData
+    return objRouteDataFrame, dictPackageData
+
+# end of _loadSourceDataset
 
 
-def fnGetAllVehicleCapacities():
+def getAllVehicleCapacities():
     """
-    Efficiently extracts all unique vehicle capacity values from the entire dataset.
-    This function is optimized for speed and memory conservation. It loads the large
-    route data, pulls out ONLY the 'executor_capacity_cm3' column, finds the unique
-    values, and then immediately releases the massive dataframe from memory to keep
-    the application's memory footprint as small as possible. This populates the
-    dropdown menu in the user interface.
+    Extracts all unique vehicle capacity values from the dataset to populate UI.
+    Optimized for memory management.
     """
-    # Load the source dataset.
-    obj_dfRouteData, _ = _fnLoadSourceDataset()
-    # Extract the unique, non-null capacity values.
-    arr_capacities = obj_dfRouteData['executor_capacity_cm3'].dropna().unique()
+    objRouteDataFrame, _ = _loadSourceDataset()
+    
+    # Extract unique values and drop nulls.
+    arrCapacities = objRouteDataFrame['executor_capacity_cm3'].dropna().unique()
 
-    # This is a critical memory management step. After we have the information we need,
-    # we explicitly delete the large object and ask the garbage collector to reclaim the memory.
-    del obj_dfRouteData
+    # Manual memory cleanup.
+    del objRouteDataFrame
     gc.collect()
 
     print("Memory released after fetching capacities.")
-    # Return a sorted list of the capacities.
-    return sorted([float(c) for c in arr_capacities])
+    
+    # Return sorted float list.
+    return sorted([float(c) for c in arrCapacities])
+
+# end of getAllVehicleCapacities
 
 
-def _fnGetOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFAULT_CANCEL_FLAG):
+def _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFAULT_CANCEL_FLAG):
     """
-    This function is the core of the 'Dataset Preparation' stage. It now finds the FIRST
-    valid, loadable route for a given capacity and caches ONLY that route's data.
-    This ensures that the data used for display is the exact same data used for the simulation,
-    fulfilling the core requirement of the revised methodology.
-
-    Args:
-        fltVehicleCapacityCm3 (float): The vehicle capacity to get data for.
-        dictCancellationFlag (dict): The shared cancellation flag.
-
-    Returns:
-        dict: A dictionary containing the processed metadata and package list for a single route.
+    Finds or creates a cached route file for the specific capacity.
+    Searches for the first valid route if no cache exists.
     """
-    # Check for cancellation at the start.
-    if dictCancellationFlag['is_cancelled']: raise CancelledException()
+    if dictCancellationFlag['is_cancelled']:
+        raise CancelledException()
 
-    # Define the name of the cache file based on the capacity.
-    str_cacheFilename = f"route_{fltVehicleCapacityCm3}.json" # Use a new naming scheme to avoid old cache conflicts.
-    str_cacheFilepath = os.path.join(g_str_DATA_CACHE_DIR, str_cacheFilename)
+    strCacheFilename = f"route_{fltVehicleCapacityCm3}.json"
+    strCacheFilepath = os.path.join(G_STR_DATA_CACHE_DIR, strCacheFilename)
 
-    # --- THE FAST PATH ---
-    # If a pre-processed cache file already exists, we load it and return the data immediately.
-    if os.path.exists(str_cacheFilepath):
-        print(f"Loading from existing single-route cache file: {str_cacheFilename}")
-        with open(str_cacheFilepath, 'r') as f:
-            return json.load(f)
+    # --- THE FAST PATH: Load existing cache ---
+    if os.path.exists(strCacheFilepath):
+        print(f"Loading from existing single-route cache file: {strCacheFilename}")
+        with open(strCacheFilepath, 'r') as fileObject:
+            return json.load(fileObject)
 
-    # --- THE SLOW PATH (only runs once per capacity) ---
-    if dictCancellationFlag['is_cancelled']: raise CancelledException()
+    # --- THE SLOW PATH: Generate cache ---
+    if dictCancellationFlag['is_cancelled']:
+        raise CancelledException()
+
     print(f"Cache not found. Searching for a single valid route for capacity: {fltVehicleCapacityCm3}")
-    obj_dfRouteDataCache, dict_packageDataCache = _fnLoadSourceDataset(dictCancellationFlag)
+    
+    objRouteDataFrameCache, dictPackageDataCache = _loadSourceDataset(dictCancellationFlag)
 
-    # Filter the massive route dataframe to find all possible routes that match the selected capacity.
-    obj_dfMatchingRoutes = obj_dfRouteDataCache[
-        obj_dfRouteDataCache['executor_capacity_cm3'] == fltVehicleCapacityCm3
+    # Filter routes matching capacity.
+    objMatchingRoutes = objRouteDataFrameCache[
+        objRouteDataFrameCache['executor_capacity_cm3'] == fltVehicleCapacityCm3
     ]
 
-    # If no routes are found for this capacity, we stop and release memory.
-    if obj_dfMatchingRoutes.empty:
-        del obj_dfRouteDataCache, dict_packageDataCache
+    if objMatchingRoutes.empty:
+        del objRouteDataFrameCache, dictPackageDataCache
         gc.collect()
         return None
     
-    arr_routeIds = obj_dfMatchingRoutes.index.tolist()
+    arrRouteIds = objMatchingRoutes.index.tolist()
     
-    # Iterate through every possible route ID for this capacity until we find one that is valid.
-    for i, str_routeId in enumerate(arr_routeIds):
-        if i % 50 == 0 and dictCancellationFlag['is_cancelled']:
+    # Iterate through potential routes to find one with valid packages.
+    for intIndex, strRouteId in enumerate(arrRouteIds):
+        if intIndex % 50 == 0 and dictCancellationFlag['is_cancelled']:
              raise CancelledException()
 
-        # Gather all the package information for this specific route.
-        dict_routePackages = dict_packageDataCache.get(str_routeId, {})
-        arr_packagesForThisRoute = []
-        for str_stopId, dict_packagesAtStop in dict_routePackages.items():
-            for str_packageId, dict_details in dict_packagesAtStop.items():
-                dict_dims = dict_details.get('dimensions', {})
+        dictRoutePackages = dictPackageDataCache.get(strRouteId, {})
+        arrPackagesForThisRoute = []
+        
+        # Flatten structure and validate dimensions.
+        for strStopId, dictPackagesAtStop in dictRoutePackages.items():
+            for strPackageId, dictDetails in dictPackagesAtStop.items():
+                dictDims = dictDetails.get('dimensions', {})
                 try:
-                    # MODIFICATION: Sanitize dimensions. If a dimension is 0 or missing, set it to 1.0.
-                    flt_h = float(dict_dims.get('height_cm', 0)) or 1.0
-                    flt_w = float(dict_dims.get('width_cm', 0)) or 1.0
-                    flt_d = float(dict_dims.get('depth_cm', 0)) or 1.0
+                    fltHeight = float(dictDims.get('height_cm', 0)) or 1.0
+                    fltWidth = float(dictDims.get('width_cm', 0)) or 1.0
+                    fltDepth = float(dictDims.get('depth_cm', 0)) or 1.0
                     
-                    # --- CRITICAL VALIDATION ---
-                    # Ensure dimensions are positive before creating the package.
-                    if (flt_h > 0 and flt_w > 0 and flt_d > 0):
-                        flt_volume = flt_h * flt_w * flt_d
-                        arr_packagesForThisRoute.append({
-                            'id': str_packageId, 'route_id': str_routeId, 'stop_id': str_stopId,
-                            'height': flt_h, 'width': flt_w, 'depth': flt_d, 'volume': flt_volume,
-                            'service_time': float(dict_details.get('planned_service_time_seconds', 0))
+                    if (fltHeight > 0 and fltWidth > 0 and fltDepth > 0):
+                        fltVolume = fltHeight * fltWidth * fltDepth
+                        arrPackagesForThisRoute.append({
+                            'id': strPackageId, 
+                            'route_id': strRouteId, 
+                            'stop_id': strStopId,
+                            'height': fltHeight, 
+                            'width': fltWidth, 
+                            'depth': fltDepth, 
+                            'volume': fltVolume,
+                            'service_time': float(dictDetails.get('planned_service_time_seconds', 0))
                         })
                 except (ValueError, TypeError):
-                    # If dimensions are malformed, skip this package.
                     continue
 
-        flt_totalVolume = sum(p['volume'] for p in arr_packagesForThisRoute)
+        fltTotalVolume = sum(p['volume'] for p in arrPackagesForThisRoute)
         
-        # --- THE VALIDATION CRITERION ---
-        # A route is valid if it has packages and their total volume fits in the truck.
-        if 0 < flt_totalVolume < fltVehicleCapacityCm3:
-            print(f"Found and caching valid display route: {str_routeId}")
+        # Validation Criterion: Must have packages and fit in truck.
+        if 0 < fltTotalVolume < fltVehicleCapacityCm3:
+            print(f"Found and caching valid display route: {strRouteId}")
 
-            # Construct the metadata object specifically for THIS SINGLE ROUTE.
-            flt_dimension = (fltVehicleCapacityCm3 ** (1./3.))
-            dict_metadata = {
-                'id': str_routeId, 'capacity_cm3': fltVehicleCapacityCm3,
-                'width': math.floor(flt_dimension), 'height': math.floor(flt_dimension), 'depth': math.floor(flt_dimension),
-                'total_package_volume': flt_totalVolume,
-                'total_service_time': sum(p['service_time'] for p in arr_packagesForThisRoute),
-                'num_packages': len(arr_packagesForThisRoute),
+            fltDimension = (fltVehicleCapacityCm3 ** (1. / 3.))
+            dictMetadata = {
+                'id': strRouteId, 
+                'capacity_cm3': fltVehicleCapacityCm3,
+                'width': math.floor(fltDimension), 
+                'height': math.floor(fltDimension), 
+                'depth': math.floor(fltDimension),
+                'total_package_volume': fltTotalVolume,
+                'total_service_time': sum(p['service_time'] for p in arrPackagesForThisRoute),
+                'num_packages': len(arrPackagesForThisRoute),
             }
 
-            # Combine the metadata and this route's packages into a single object for caching.
-            dict_dataToCache = { 'metadata': dict_metadata, 'packages': arr_packagesForThisRoute }
+            dictDataToCache = {
+                'metadata': dictMetadata, 
+                'packages': arrPackagesForThisRoute 
+            }
             
-            with open(str_cacheFilepath, 'w') as f:
-                json.dump(dict_dataToCache, f)
-            print(f"Successfully created single-route cache: {str_cacheFilename}")
+            with open(strCacheFilepath, 'w') as fileObject:
+                json.dump(dictDataToCache, fileObject)
+                
+            print(f"Successfully created single-route cache: {strCacheFilename}")
             
-            del obj_dfRouteDataCache, dict_packageDataCache
+            del objRouteDataFrameCache, dictPackageDataCache
             gc.collect()
-            return dict_dataToCache
+            return dictDataToCache
             
-    # If no valid route was found after checking all possibilities.
-    del obj_dfRouteDataCache, dict_packageDataCache
+    # Cleanup if no route found.
+    del objRouteDataFrameCache, dictPackageDataCache
     gc.collect()
     return None
 
+# end of _getOrCreateCapacityCache
 
-def fnGetDisplayDataForVehicle(fltVehicleCapacityCm3, dictCancellationFlag=DEFAULT_CANCEL_FLAG):
+
+def getDisplayDataForVehicle(fltVehicleCapacityCm3, dictCancellationFlag=DEFAULT_CANCEL_FLAG):
     """
-    Retrieves the single, representative sample route for a given capacity from the cache.
-    This function is used to populate the information panels on the user interface before a
-    simulation is run.
-
-    Args:
-        fltVehicleCapacityCm3 (float): The target vehicle capacity.
-        dictCancellationFlag (dict): The shared cancellation flag.
-
-    Returns:
-        tuple: A dictionary with the single vehicle's info, and a list of its packages.
+    Public interface to retrieve cached data for display in the UI.
     """
     print(f"Loading display data for capacity: {fltVehicleCapacityCm3}")
-    dict_cachedData = _fnGetOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag)
     
-    if not dict_cachedData:
+    dictCachedData = _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag)
+    
+    if not dictCachedData:
         return None, []
     
-    return dict_cachedData['metadata'], dict_cachedData['packages']
+    return dictCachedData['metadata'], dictCachedData['packages']
+
+# end of getDisplayDataForVehicle
 
 
-def fnGetSimulationDataForVehicle(fltVehicleCapacityCm3, dictCancellationFlag=DEFAULT_CANCEL_FLAG):
+def getSimulationDataForVehicle(fltVehicleCapacityCm3, dictCancellationFlag=DEFAULT_CANCEL_FLAG):
     """
-    Retrieves the single, representative sample route for a given capacity from the cache.
-    This provides the EXACT same problem instance as fnGetDisplayDataForVehicle, ensuring
-    that the simulation runs on the same data the user sees.
-
-    Args:
-        fltVehicleCapacityCm3 (float): The target vehicle capacity.
-        dictCancellationFlag (dict): The shared cancellation flag.
-
-    Returns:
-        tuple: The vehicle metadata and the list of packages for the single cached route.
+    Public interface to retrieve cached data for the simulation engine.
+    Ensures data consistency between UI and Simulation.
     """
     print(f"Loading simulation data for capacity: {fltVehicleCapacityCm3}")
-    # This function now behaves identically to fnGetDisplayDataForVehicle.
-    dict_cachedData = _fnGetOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag)
+    
+    dictCachedData = _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag)
 
-    if not dict_cachedData: 
+    if not dictCachedData: 
         return None, []
     
-    return dict_cachedData['metadata'], dict_cachedData['packages']
+    return dictCachedData['metadata'], dictCachedData['packages']
+
+# end of getSimulationDataForVehicle

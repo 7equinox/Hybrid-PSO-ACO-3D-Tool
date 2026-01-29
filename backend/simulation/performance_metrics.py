@@ -1,641 +1,579 @@
 """
 System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
-Module Name: Performance Metrics Calculation (RECURSIVE CASCADE ON-TOP REMOVAL)
+Module Name: Performance Metrics Calculation
 
-Purpose: CRITICAL FIX - Deep recursive on-top item detection
-         UPDATED - Implements Chapter 3 Methodology for Volume Utilization
-                   (Consolidated vs. Fragmented Space)
+Purpose of this file:
+Implements Chapter 3 Methodology for Volume Utilization and Unloading Efficiency.
+Calculates Equations 1, 2, and 3, and detects Recursive On-Top logic for blockers.
 
-The Problem:
-Items stacking ON TOP of items ON TOP not being detected.
-Causes cascading floating items.
-
-The Fix:
-RECURSIVE detection - follow the chain all the way up!
-METHODOLOGY UPDATE: Includes Fragmented Space Adjustment.
+Author/s:
+ALFARO, ABRAM S.
+BUNAO, JOHN GLAY C.
+DELA CRUZ, JUAN GABRIEL D.
+ERFE, JEFFERSON B.
+ESTONILO, JULIUS EVAN C.
 """
+
 import numpy as np
 import random
 from itertools import permutations
 import hashlib
 import time
 
-def fnCalculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo, strAlgorithmName, initial_free_areas=None):
+def calculateAllMetrics(arrPackedItems, fltBinVolume, arrAllPackagesInfo, strAlgorithmName, arrInitialFreeAreas=None):
     """
-    Serves as the main function to compute all defined performance metrics.
-    Updated to include Equation 2: Adjusted Volume Utilization with Fragmented Space.
+    Main entry point for metric calculation.
+    Computes volume utilization (adjusted) and generates unloading events.
     """
     # Equation 1: Base Volume Utilization
-    flt_totalPackedVolume = sum(float(item.get_volume()) for item in arrPackedItems)
-    flt_binVolume = float(fltBinVolume)
+    fltTotalPackedVolume = sum(float(objItem.get_volume()) for objItem in arrPackedItems)
+    fltBinVolumeVal = float(fltBinVolume)
     
-    vu_base = (flt_totalPackedVolume / flt_binVolume * 100) if flt_binVolume > 0 else 0.0
+    fltVuBase = (fltTotalPackedVolume / fltBinVolumeVal * 100) if fltBinVolumeVal > 0 else 0.0
 
     # Equation 2 & 3: Fragmented Space Logic
-    vu_adjusted = vu_base
-    vu_fragmented_vol = 0.0
+    fltVuAdjusted = fltVuBase
+    fltVuFragmentedVol = 0.0
     
-    # We only calculate fragmentation if we have free areas detected
-    if initial_free_areas:
-        vu_adjusted, vu_fragmented_vol = _calculate_fragmented_volume_and_utilization(
-            initial_free_areas, 
+    if arrInitialFreeAreas:
+        fltVuAdjusted, fltVuFragmentedVol = _calculateFragmentedVolumeAndUtilization(
+            arrInitialFreeAreas, 
             arrAllPackagesInfo, 
-            vu_base, 
-            flt_binVolume
+            fltVuBase, 
+            fltBinVolumeVal
         )
 
-    dict_packagesInfoMap = {p['id']: p for p in arrAllPackagesInfo}
+    dictPackagesInfoMap = {p['id']: p for p in arrAllPackagesInfo}
     
-    bin_dims = [0, 0, 0]
+    arrBinDims = [0, 0, 0]
     if arrPackedItems and hasattr(arrPackedItems[0], 'bin') and arrPackedItems[0].bin:
-        parent_bin = arrPackedItems[0].bin
-        bin_dims = [float(parent_bin.width), float(parent_bin.height), float(parent_bin.depth)]
+        objParentBin = arrPackedItems[0].bin
+        arrBinDims = [float(objParentBin.width), float(objParentBin.height), float(objParentBin.depth)]
 
-    dict_unloadingResult = fnGenerateUnloadingSequence(arrPackedItems, dict_packagesInfoMap, strAlgorithmName, bin_dims, initial_free_areas)
+    dictUnloadingResult = _generateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorithmName, arrBinDims, arrInitialFreeAreas)
     
     return {
-        'volume_utilization': round(vu_adjusted, 2),
-        'base_volume_utilization': round(vu_base, 2),
-        'fragmented_volume': round(vu_fragmented_vol, 2),
-        'relocation_count': dict_unloadingResult['relocation_count'],
-        'unloading_sequence': dict_unloadingResult['event_log']
+        'volume_utilization': round(fltVuAdjusted, 2),
+        'base_volume_utilization': round(fltVuBase, 2),
+        'fragmented_volume': round(fltVuFragmentedVol, 2),
+        'relocation_count': dictUnloadingResult['relocation_count'],
+        'unloading_sequence': dictUnloadingResult['event_log']
     }
 
-
-def _get_unique_orientations(dims):
-    """Get all unique 3D rotations"""
-    seen = set()
-    orientations = []
-    for perm in permutations(dims):
-        if perm not in seen:
-            seen.add(perm)
-            orientations.append(list(map(float, perm)))
-    return orientations
+# end of calculateAllMetrics
 
 
-def _can_item_fit_in_space(space_dims, item_dims):
+def _getUniqueOrientations(arrDims):
     """
-    Checks if an item can fit into a space in any standard rotation.
+    Get all unique 3D rotations/permutations of a dimension set.
+    """
+    objSeen = set()
+    arrOrientations = []
+    
+    for objPerm in permutations(arrDims):
+        if objPerm not in objSeen:
+            objSeen.add(objPerm)
+            arrOrientations.append(list(map(float, objPerm)))
+            
+    return arrOrientations
+
+# end of _getUniqueOrientations
+
+
+def _canItemFitInSpace(arrSpaceDims, arrItemDims):
+    """
+    Checks if an item can fit into a specific space volume in any standard rotation.
     Used for classification of Fragmented vs Consolidated space.
     """
-    sw, sh, sd = sorted([float(x) for x in space_dims])
+    fltSpaceW, fltSpaceH, fltSpaceD = sorted([float(x) for x in arrSpaceDims])
     
-    # Get all unique orientations for the item
-    orientations = _get_unique_orientations(item_dims)
+    arrOrientations = _getUniqueOrientations(arrItemDims)
     
-    for ori in orientations:
-        iw, ih, id_ = sorted(ori)
-        # We sort both to check pure volume fitting regardless of specific axis orientation 
-        # (simplifying 6 checks to 1 logic since space allows rotation)
-        if iw <= sw and ih <= sh and id_ <= sd:
+    for arrOri in arrOrientations:
+        fltItemW, fltItemH, fltItemD = sorted(arrOri)
+        # Check pure volume fitting strictly
+        if fltItemW <= fltSpaceW and fltItemH <= fltSpaceH and fltItemD <= fltSpaceD:
             return True
             
     return False
 
+# end of _canItemFitInSpace
 
-def _calculate_fragmented_volume_and_utilization(free_areas, all_packages, vu_base, total_bin_vol):
+
+def _calculateFragmentedVolumeAndUtilization(arrFreeAreas, arrAllPackages, fltVuBase, fltTotalBinVol):
     """
-    Implements Equations 2 and 3.
-    
-    Categorizes remaining space as:
-    1. Continuous/Consolidated (Items CAN fit)
-    2. Fragmented (Items CANNOT fit due to geometry)
-    
-    Returns:
-        (Adjusted Utilization %, Total Fragmented Volume)
+    Implements Equations 2 and 3: Adjusted Utilization.
+    Categorizes free space into Usable or Fragmented.
     """
-    # Get unique dimensions of all potential items
-    unique_item_dims = []
-    seen_hashes = set()
+    # Cache unique item dimensions
+    arrUniqueItemDims = []
+    objSeenHashes = set()
     
-    for pkg in all_packages:
-        dims = tuple(sorted([float(pkg['width']), float(pkg['height']), float(pkg['depth'])]))
-        if dims not in seen_hashes:
-            unique_item_dims.append(dims)
-            seen_hashes.add(dims)
+    for dictPkg in arrAllPackages:
+        tplDims = tuple(sorted([float(dictPkg['width']), float(dictPkg['height']), float(dictPkg['depth'])]))
+        if tplDims not in objSeenHashes:
+            arrUniqueItemDims.append(tplDims)
+            objSeenHashes.add(tplDims)
             
-    total_fragmented_volume = 0.0
+    fltTotalFragmentedVolume = 0.0
     
-    for area in free_areas:
-        area_dims = area['dims']
-        area_vol = area['volume'] # calculated in detector
+    for dictArea in arrFreeAreas:
+        arrAreaDims = dictArea['dims']
+        fltAreaVol = dictArea['volume']
         
-        # Methodology: Check if this area can accommodate ANY of the packed items
-        is_fragmented = True
+        blnIsFragmented = True
         
-        for item_dim in unique_item_dims:
-            if _can_item_fit_in_space(area_dims, item_dim):
-                is_fragmented = False
+        # Check if ANY package fits in this area
+        for arrItemDim in arrUniqueItemDims:
+            if _canItemFitInSpace(arrAreaDims, arrItemDim):
+                blnIsFragmented = False
                 break
         
-        if is_fragmented:
-            total_fragmented_volume += area_vol
+        if blnIsFragmented:
+            fltTotalFragmentedVolume += fltAreaVol
             
-    # Equation 2: VUj = VUbase + (VUfragmented / VUcontainer * 100)
-    fragmented_percentage = (total_fragmented_volume / total_bin_vol * 100) if total_bin_vol > 0 else 0
-    vu_adjusted = vu_base + fragmented_percentage
+    # Eq 2: Adjusted VU
+    fltFragmentedPercentage = (fltTotalFragmentedVolume / fltTotalBinVol * 100) if fltTotalBinVol > 0 else 0
+    fltVuAdjusted = fltVuBase + fltFragmentedPercentage
     
-    # Cap at 100% just in case of float anomalies
-    vu_adjusted = min(vu_adjusted, 100.0)
-    
-    return vu_adjusted, total_fragmented_volume
+    return min(fltVuAdjusted, 100.0), fltTotalFragmentedVolume
+
+# end of _calculateFragmentedVolumeAndUtilization
 
 
-def _generate_unique_seed(strAlgorithmName):
-    """Generate unique seed for this simulation"""
-    timestamp = str(time.time() * 1000).encode()
-    algo_hash = hashlib.md5(strAlgorithmName.encode()).hexdigest()
-    combined = hashlib.sha256(timestamp + algo_hash.encode()).hexdigest()
-    return int(combined[:12], 16)
+def _generateUniqueSeed(strAlgorithmName):
+    """
+    Generates a deterministic yet unique seed based on time and name.
+    """
+    strTimestamp = str(time.time() * 1000).encode()
+    strAlgoHash = hashlib.md5(strAlgorithmName.encode()).hexdigest()
+    strCombined = hashlib.sha256(strTimestamp + strAlgoHash.encode()).hexdigest()
+    return int(strCombined[:12], 16)
+
+# end of _generateUniqueSeed
 
 
-def _check_collision(pos1, dims1, pos2, dims2):
-    """STRICT 3D AABB collision test - NO MERGING ALLOWED"""
-    if pos1[0] + dims1[0] <= pos2[0] or pos2[0] + dims2[0] <= pos1[0]:
+def _checkCollision(arrPos1, arrDims1, arrPos2, arrDims2):
+    """
+    STRICT 3D Axis-Aligned Bounding Box (AABB) collision test.
+    """
+    if arrPos1[0] + arrDims1[0] <= arrPos2[0] or arrPos2[0] + arrDims2[0] <= arrPos1[0]:
         return False
-    if pos1[1] + dims1[1] <= pos2[1] or pos2[1] + dims2[1] <= pos1[1]:
+    if arrPos1[1] + arrDims1[1] <= arrPos2[1] or arrPos2[1] + arrDims2[1] <= arrPos1[1]:
         return False
-    if pos1[2] + dims1[2] <= pos2[2] or pos2[2] + dims2[2] <= pos1[2]:
+    if arrPos1[2] + arrDims1[2] <= arrPos2[2] or arrPos2[2] + arrDims2[2] <= arrPos1[2]:
         return False
     return True
 
-
-def _in_bounds(pos, dims, bin_dims):
-    """Check if item is within container"""
-    return (pos[0] >= 0 and pos[1] >= 0 and pos[2] >= 0 and
-            pos[0] + dims[0] <= bin_dims[0] and
-            pos[1] + dims[1] <= bin_dims[1] and
-            pos[2] + dims[2] <= bin_dims[2])
+# end of _checkCollision
 
 
-def _calculate_xz_overlap_area(pos1, dims1, pos2, dims2):
-    """Calculate the ACTUAL overlap area in X-Z plane"""
-    x_overlap_start = max(pos1[0], pos2[0])
-    x_overlap_end = min(pos1[0] + dims1[0], pos2[0] + dims2[0])
-    x_overlap_length = max(0, x_overlap_end - x_overlap_start)
+def _inBounds(arrPos, arrDims, arrBinDims):
+    """
+    Validates if an object is fully contained within the bin boundaries.
+    """
+    return (arrPos[0] >= 0 and arrPos[1] >= 0 and arrPos[2] >= 0 and
+            arrPos[0] + arrDims[0] <= arrBinDims[0] and
+            arrPos[1] + arrDims[1] <= arrBinDims[1] and
+            arrPos[2] + arrDims[2] <= arrBinDims[2])
+
+# end of _inBounds
+
+
+def _calculateXzOverlapArea(arrPos1, arrDims1, arrPos2, arrDims2):
+    """
+    Calculates the contact surface area in the horizontal X-Z plane.
+    Used for gravity support and top-down blockage detection.
+    """
+    fltXOverlapStart = max(arrPos1[0], arrPos2[0])
+    fltXOverlapEnd = min(arrPos1[0] + arrDims1[0], arrPos2[0] + arrDims2[0])
+    fltXOverlapLength = max(0, fltXOverlapEnd - fltXOverlapStart)
     
-    z_overlap_start = max(pos1[2], pos2[2])
-    z_overlap_end = min(pos1[2] + dims1[2], pos2[2] + dims2[2])
-    z_overlap_length = max(0, z_overlap_end - z_overlap_start)
+    fltZOverlapStart = max(arrPos1[2], arrPos2[2])
+    fltZOverlapEnd = min(arrPos1[2] + arrDims1[2], arrPos2[2] + arrDims2[2])
+    fltZOverlapLength = max(0, fltZOverlapEnd - fltZOverlapStart)
     
-    overlap_area = x_overlap_length * z_overlap_length
-    return overlap_area
+    return fltXOverlapLength * fltZOverlapLength
+
+# end of _calculateXzOverlapArea
 
 
-def _has_direct_contact(blocker_pos, blocker_dims, target_pos, target_dims):
-    """Check if blocker is DIRECTLY ON TOP of target (physical contact)"""
-    blocker_bottom_y = blocker_pos[1]
-    target_top_y = target_pos[1] + target_dims[1]
+def _hasDirectContact(arrBlockerPos, arrBlockerDims, arrTargetPos, arrTargetDims):
+    """
+    Checks if one item physically touches another from above (Y-axis).
+    """
+    fltBlockerBottomY = arrBlockerPos[1]
+    fltTargetTopY = arrTargetPos[1] + arrTargetDims[1]
     
-    y_distance = abs(blocker_bottom_y - target_top_y)
+    fltYDistance = abs(fltBlockerBottomY - fltTargetTopY)
     
-    if y_distance > 1.0:
+    if fltYDistance > 1.0:
         return False
     
-    overlap_area = _calculate_xz_overlap_area(blocker_pos, blocker_dims, target_pos, target_dims)
-    return overlap_area > 0
+    fltOverlapArea = _calculateXzOverlapArea(arrBlockerPos, arrBlockerDims, arrTargetPos, arrTargetDims)
+    return fltOverlapArea > 0
+
+# end of _hasDirectContact
 
 
-def _has_clear_extraction_path(item_pos, item_dims, all_items_dict):
-    """Check if item can be extracted without obstruction"""
-    item_y = item_pos[1]
-    item_z = item_pos[2]
+def _hasClearExtractionPath(arrItemPos, arrItemDims, dictAllItems):
+    """
+    Verifies if an item can be pulled out (e.g., to the door) without collision.
+    """
+    fltItemY = arrItemPos[1]
+    fltItemZ = arrItemPos[2]
     
-    test_x = -100
-    test_pos = [float(test_x), float(item_y), float(item_z)]
+    fltTestX = -100  # Virtual extraction point
+    arrTestPos = [float(fltTestX), float(fltItemY), float(fltItemZ)]
     
-    path_clear = True
-    for other in all_items_dict.values():
-        if other['pos'][0] >= item_pos[0]:
+    blnPathClear = True
+    for dictOther in dictAllItems.values():
+        if dictOther['pos'][0] >= arrItemPos[0]:
             continue
         
-        if _check_collision(test_pos, item_dims, other['pos'], other['dims']):
-            path_clear = False
+        if _checkCollision(arrTestPos, arrItemDims, dictOther['pos'], dictOther['dims']):
+            blnPathClear = False
             break
     
-    if path_clear:
-        return True
-    
-    return False
+    return blnPathClear
+
+# end of _hasClearExtractionPath
 
 
-def _is_truly_blocking(item_id, target_id, all_items_dict):
+def _isTrulyBlocking(strItemId, strTargetId, dictAllItems):
     """
-    SMART BLOCKER DETECTION with ALL physics checks.
+    Sophisticated blocker logic: overlapping in X/Z, higher in Y, and contacting.
     """
-    if item_id == target_id or item_id not in all_items_dict or target_id not in all_items_dict:
+    if strItemId == strTargetId or strItemId not in dictAllItems or strTargetId not in dictAllItems:
         return False
     
-    item = all_items_dict[item_id]
-    target = all_items_dict[target_id]
+    dictItem = dictAllItems[strItemId]
+    dictTarget = dictAllItems[strTargetId]
     
-    item_pos, item_dims = item['pos'], item['dims']
-    target_pos, target_dims = target['pos'], target['dims']
+    arrItemPos, arrItemDims = dictItem['pos'], dictItem['dims']
+    arrTargetPos, arrTargetDims = dictTarget['pos'], dictTarget['dims']
     
-    if item_pos[1] < target_pos[1] - 1e-4:
+    if arrItemPos[1] < arrTargetPos[1] - 1e-4:
         return False
     
-    x_overlap_start = max(item_pos[0], target_pos[0])
-    x_overlap_end = min(item_pos[0] + item_dims[0], target_pos[0] + target_dims[0])
-    x_has_overlap = x_overlap_end > x_overlap_start
-    
-    z_overlap_start = max(item_pos[2], target_pos[2])
-    z_overlap_end = min(item_pos[2] + item_dims[2], target_pos[2] + target_dims[2])
-    z_has_overlap = z_overlap_end > z_overlap_start
-    
-    if not (x_has_overlap and z_has_overlap):
+    # Fast overlap check first
+    if not ((max(arrItemPos[0], arrTargetPos[0]) < min(arrItemPos[0] + arrItemDims[0], arrTargetPos[0] + arrTargetDims[0])) and 
+            (max(arrItemPos[2], arrTargetPos[2]) < min(arrItemPos[2] + arrItemDims[2], arrTargetPos[2] + arrTargetDims[2]))):
         return False
     
-    target_area = target_dims[0] * target_dims[2]
-    overlap_area = _calculate_xz_overlap_area(item_pos, item_dims, target_pos, target_dims)
-    overlap_percentage = (overlap_area / target_area) * 100 if target_area > 0 else 0
+    fltTargetArea = arrTargetDims[0] * arrTargetDims[2]
+    fltOverlapArea = _calculateXzOverlapArea(arrItemPos, arrItemDims, arrTargetPos, arrTargetDims)
+    fltOverlapPercentage = (fltOverlapArea / fltTargetArea) * 100 if fltTargetArea > 0 else 0
     
-    if overlap_percentage < 30:
+    if fltOverlapPercentage < 30:
         return False
     
-    has_contact = _has_direct_contact(item_pos, item_dims, target_pos, target_dims)
-    if not has_contact:
+    blnHasContact = _hasDirectContact(arrItemPos, arrItemDims, arrTargetPos, arrTargetDims)
+    if not blnHasContact:
         return False
     
-    if not _has_clear_extraction_path(item_pos, item_dims, all_items_dict):
+    if not _hasClearExtractionPath(arrItemPos, arrItemDims, dictAllItems):
         return False
     
     return True
 
+# end of _isTrulyBlocking
 
-def _has_gravity_support(pos, dims, dict_items_in_bin):
+
+def _hasGravitySupport(arrPos, arrDims, dictItemsInBin):
     """
-    Check if item has proper gravity support below it.
-    Item must have ≥80% of base supported
+    Checks if item has >= 80% support area from below.
     """
-    item_y = pos[1]
-    item_x = pos[0]
-    item_z = pos[2]
-    item_width = dims[0]
-    item_depth = dims[2]
-    
-    if abs(item_y) < 1e-4:
+    fltItemY = arrPos[1]
+    if abs(fltItemY) < 1e-4:
         return True, 0.0
     
-    supporting_items = []
-    max_support_y = 0.0
+    arrSupportingItems = []
+    fltMaxSupportY = 0.0
     
-    for other in dict_items_in_bin.values():
-        other_pos = other['pos']
-        other_dims = other['dims']
-        
-        if other_pos[1] + other_dims[1] > item_y + 1e-4:
+    for dictOther in dictItemsInBin.values():
+        if dictOther['pos'][1] + dictOther['dims'][1] > fltItemY + 1e-4:
             continue
-        
-        x_overlap = (item_x + item_width > other_pos[0] and 
-                    other_pos[0] + other_dims[0] > item_x)
-        z_overlap = (item_z + item_depth > other_pos[2] and 
-                    other_pos[2] + other_dims[2] > item_z)
-        
-        if x_overlap and z_overlap:
-            supporting_items.append(other)
-            max_support_y = max(max_support_y, other_pos[1] + other_dims[1])
+        # Check general overlap before calculating area
+        if (arrPos[0] + arrDims[0] > dictOther['pos'][0] and dictOther['pos'][0] + dictOther['dims'][0] > arrPos[0]) and \
+           (arrPos[2] + arrDims[2] > dictOther['pos'][2] and dictOther['pos'][2] + dictOther['dims'][2] > arrPos[2]):
+            arrSupportingItems.append(dictOther)
+            fltMaxSupportY = max(fltMaxSupportY, dictOther['pos'][1] + dictOther['dims'][1])
     
-    if not supporting_items:
+    if not arrSupportingItems:
         return False, 0.0
     
-    total_support_area = 0.0
-    for support in supporting_items:
-        support_contact = _calculate_xz_overlap_area(pos, dims, support['pos'], support['dims'])
-        total_support_area += support_contact
+    fltTotalSupportArea = 0.0
+    for dictSupport in arrSupportingItems:
+        fltTotalSupportArea += _calculateXzOverlapArea(arrPos, arrDims, dictSupport['pos'], dictSupport['dims'])
     
-    item_base_area = item_width * item_depth
-    support_percentage = (total_support_area / item_base_area) * 100 if item_base_area > 0 else 0
+    fltItemBaseArea = arrDims[0] * arrDims[2]
+    fltSupportPct = (fltTotalSupportArea / fltItemBaseArea) * 100 if fltItemBaseArea > 0 else 0
     
-    if support_percentage < 80:
-        return False, max_support_y
+    if fltSupportPct < 80:
+        return False, fltMaxSupportY
     
-    return True, max_support_y
+    return True, fltMaxSupportY
+
+# end of _hasGravitySupport
 
 
-def _find_best_position_exhaustive(item_dims, dict_items_in_bin, bin_dims, original_pos):
+def _findBestPositionExhaustive(arrItemDims, dictItemsInBin, arrBinDims, arrOriginalPos):
     """
-    EXHAUSTIVE XYZ COORDINATE SCANNER with 80% SUPPORT REQUIREMENT
+    Searches grid for a valid spot (collision-free + support) to place a returned item.
     """
+    arrBestPos = None
+    arrBestDims = None
+    fltBestScore = float('-inf')
     
-    original_dims = item_dims
-    best_pos = None
-    best_dims = None
-    best_score = float('-inf')
+    # 1. Try Original position first
+    arrCandidatePos = list(map(float, arrOriginalPos))
     
-    candidate_pos = [float(original_pos[0]), float(original_pos[1]), float(original_pos[2])]
-    
-    if _in_bounds(candidate_pos, original_dims, bin_dims):
-        has_collision = any(
-            _check_collision(candidate_pos, original_dims, other['pos'], other['dims'])
-            for other in dict_items_in_bin.values()
+    if _inBounds(arrCandidatePos, arrItemDims, arrBinDims):
+        blnHasCollision = any(
+            _checkCollision(arrCandidatePos, arrItemDims, o['pos'], o['dims']) 
+            for o in dictItemsInBin.values()
         )
-        
-        if not has_collision:
-            has_support, _ = _has_gravity_support(candidate_pos, original_dims, dict_items_in_bin)
-            if has_support:
-                return candidate_pos, original_dims
+        if not blnHasCollision:
+            blnHasSupport, _ = _hasGravitySupport(arrCandidatePos, arrItemDims, dictItemsInBin)
+            if blnHasSupport:
+                return arrCandidatePos, arrItemDims
     
-    for rotated_dims in _get_unique_orientations(original_dims):
-        rotated_dims = [float(d) for d in rotated_dims]
+    # 2. Search alternative positions with rotations
+    for arrRotatedDims in _getUniqueOrientations(arrItemDims):
+        arrRotatedDims = list(map(float, arrRotatedDims))
         
-        for test_x in range(0, int(bin_dims[0] - rotated_dims[0]) + 1):
-            for test_z in range(0, int(bin_dims[2] - rotated_dims[2]) + 1):
-                for test_y in range(0, int(bin_dims[1] - rotated_dims[1]) + 1):
+        for intX in range(0, int(arrBinDims[0] - arrRotatedDims[0]) + 1):
+            for intZ in range(0, int(arrBinDims[2] - arrRotatedDims[2]) + 1):
+                for intY in range(0, int(arrBinDims[1] - arrRotatedDims[1]) + 1):
                     
-                    candidate_pos = [float(test_x), float(test_y), float(test_z)]
+                    arrTestPos = [float(intX), float(intY), float(intZ)]
                     
-                    if not _in_bounds(candidate_pos, rotated_dims, bin_dims):
+                    if not _inBounds(arrTestPos, arrRotatedDims, arrBinDims): continue
+                    
+                    if any(_checkCollision(arrTestPos, arrRotatedDims, o['pos'], o['dims']) for o in dictItemsInBin.values()):
                         continue
                     
-                    has_collision = any(
-                        _check_collision(candidate_pos, rotated_dims, other['pos'], other['dims'])
-                        for other in dict_items_in_bin.values()
-                    )
+                    blnSup, _ = _hasGravitySupport(arrTestPos, arrRotatedDims, dictItemsInBin)
+                    if not blnSup: continue
                     
-                    if has_collision:
-                        continue
+                    fltDist = abs(intX - arrOriginalPos[0]) + abs(intZ - arrOriginalPos[2])
+                    fltScore = -intY * 10000 - fltDist
                     
-                    has_support, support_y = _has_gravity_support(candidate_pos, rotated_dims, dict_items_in_bin)
-                    if not has_support:
-                        continue
-                    
-                    distance_to_original = abs(test_x - original_pos[0]) + abs(test_z - original_pos[2])
-                    score = -test_y * 10000 - distance_to_original
-                    
-                    if score > best_score:
-                        best_score = score
-                        best_pos = candidate_pos
-                        best_dims = rotated_dims
+                    if fltScore > fltBestScore:
+                        fltBestScore = fltScore
+                        arrBestPos = arrTestPos
+                        arrBestDims = arrRotatedDims
     
-    if best_pos is not None:
-        return best_pos, best_dims
+    if arrBestPos is not None:
+        return arrBestPos, arrBestDims
     
-    max_support_y = 0.0
-    for other in dict_items_in_bin.values():
-        other_pos = other['pos']
-        other_dims = other['dims']
-        
-        x_overlap = (original_pos[0] + original_dims[0] > other_pos[0] and 
-                    other_pos[0] + other_dims[0] > original_pos[0])
-        z_overlap = (original_pos[2] + original_dims[2] > other_pos[2] and 
-                    other_pos[2] + other_dims[2] > original_pos[2])
-        
-        if x_overlap and z_overlap:
-            max_support_y = max(max_support_y, other_pos[1] + other_dims[1])
-    
-    fallback_pos = [float(original_pos[0]), float(max_support_y), float(original_pos[2])]
-    
-    if _in_bounds(fallback_pos, original_dims, bin_dims):
-        return fallback_pos, original_dims
-    
-    return [float(original_pos[0]), float(original_pos[1]), float(original_pos[2])], original_dims
+    # Fallback to floor if no valid spot found
+    return [float(arrOriginalPos[0]), 0.0, float(arrOriginalPos[2])], arrItemDims
+
+# end of _findBestPositionExhaustive
 
 
-def _get_items_on_top_recursive(item_id, all_items_dict, visited=None):
+def _getItemsOnTopRecursive(strItemId, dictAllItems, objVisited=None):
     """
-    NEW - RECURSIVE CASCADE: Find ALL items on top, including items on top of those items!
+    Recursively finds chain of items stacked on top of the given item.
     """
-    if visited is None:
-        visited = set()
+    if objVisited is None:
+        objVisited = set()
     
-    if item_id in visited:
-        return []  # Already processed
+    if strItemId in objVisited: return []
+    objVisited.add(strItemId)
     
-    visited.add(item_id)
+    if strItemId not in dictAllItems: return []
     
-    if item_id not in all_items_dict:
-        return []
+    dictItem = dictAllItems[strItemId]
+    arrItemPos = dictItem['pos']
+    arrItemDims = dictItem['dims']
+    fltItemTopY = arrItemPos[1] + arrItemDims[1]
     
-    item = all_items_dict[item_id]
-    item_pos = item['pos']
-    item_dims = item['dims']
-    item_top_y = item_pos[1] + item_dims[1]
+    arrDirectOnTop = []
     
-    direct_on_top = []
-    
-    # Find items DIRECTLY on top of this item
-    for other_id, other in all_items_dict.items():
-        if other_id == item_id or other_id in visited:
-            continue
+    # Find items immediately above
+    for strOtherId, dictOther in dictAllItems.items():
+        if strOtherId == strItemId or strOtherId in objVisited: continue
         
-        other_pos = other['pos']
-        other_dims = other['dims']
-        
-        # Other must be directly on top (within 1cm)
-        y_distance = abs(other_pos[1] - item_top_y)
-        if y_distance > 1.0:
-            continue
-        
-        # Must have X-Z overlap
-        if _calculate_xz_overlap_area(item_pos, item_dims, other_pos, other_dims) > 0:
-            direct_on_top.append(other_id)
+        if abs(dictOther['pos'][1] - fltItemTopY) <= 1.0:
+            if _calculateXzOverlapArea(arrItemPos, arrItemDims, dictOther['pos'], dictOther['dims']) > 0:
+                arrDirectOnTop.append(strOtherId)
     
-    # RECURSIVE: For each item directly on top, find what's on top of IT
-    items_on_top_chain = []
-    for on_top_id in direct_on_top:
-        items_on_top_chain.append(on_top_id)
-        # RECURSIVELY find items on top of this on_top_id
-        cascade = _get_items_on_top_recursive(on_top_id, all_items_dict, visited)
-        items_on_top_chain.extend(cascade)
+    # Recurse
+    arrItemsOnTopChain = []
+    for strOnTopId in arrDirectOnTop:
+        arrItemsOnTopChain.append(strOnTopId)
+        arrItemsOnTopChain.extend(_getItemsOnTopRecursive(strOnTopId, dictAllItems, objVisited))
     
-    return items_on_top_chain
+    return arrItemsOnTopChain
+
+# end of _getItemsOnTopRecursive
 
 
-def _get_smart_blocker_stack(target_id, all_items_dict):
+def _getSmartBlockerStack(strTargetId, dictAllItems):
     """
-    SMART BLOCKER DETECTION with RECURSIVE CASCADE ON-TOP HANDLING.
+    Identifies all blockers, including the recursive cascade of items on top of blockers.
     """
-    if target_id not in all_items_dict:
-        return []
+    if strTargetId not in dictAllItems: return []
     
-    target = all_items_dict[target_id]
-    ty = target['pos'][1]
-    target_top_y = ty + all_items_dict[target_id]['dims'][1]
+    fltTargetTopY = dictAllItems[strTargetId]['pos'][1] + dictAllItems[strTargetId]['dims'][1]
+    arrBlockingItems = []
     
-    blocking_items = []
-    
-    for item_id, item in all_items_dict.items():
-        if item_id == target_id:
-            continue
+    for strItemId in dictAllItems.keys():
+        if strItemId == strTargetId: continue
         
-        if _is_truly_blocking(item_id, target_id, all_items_dict):
-            blocking_items.append(item_id)
+        if _isTrulyBlocking(strItemId, strTargetId, dictAllItems):
+            arrBlockingItems.append(strItemId)
+            
+    # Solve dependencies for each blocker
+    arrToRemove = []
+    objVisitedGlobal = set()
     
-    # NEW: For each blocking item, RECURSIVELY find ALL items on top
-    items_to_remove_with_dependencies = []
-    visited_global = set()
-    
-    for blocker_id in blocking_items:
-        if blocker_id in visited_global:
-            continue
+    for strBlockerId in arrBlockingItems:
+        if strBlockerId in objVisitedGlobal: continue
         
-        # RECURSIVE cascade detection
-        cascade_items = _get_items_on_top_recursive(blocker_id, all_items_dict)
+        arrCascade = _getItemsOnTopRecursive(strBlockerId, dictAllItems)
         
-        # Add cascade items FIRST (must remove before blocker)
-        for cascade_id in cascade_items:
-            if cascade_id not in items_to_remove_with_dependencies and cascade_id not in visited_global:
-                items_to_remove_with_dependencies.append(cascade_id)
-                visited_global.add(cascade_id)
-        
-        # Then add blocker itself
-        if blocker_id not in items_to_remove_with_dependencies:
-            items_to_remove_with_dependencies.append(blocker_id)
-            visited_global.add(blocker_id)
-    
-    # Sort by Y distance (closest to target top first)
-    def y_distance_from_target_top(item_id):
-        item = all_items_dict[item_id]
-        item_bottom_y = item['pos'][1]
-        distance = item_bottom_y - target_top_y
-        return distance
-    
-    items_to_remove_with_dependencies.sort(key=y_distance_from_target_top)
-    
-    return items_to_remove_with_dependencies
+        # Add items above blocker first
+        for strCasId in arrCascade:
+            if strCasId not in arrToRemove and strCasId not in objVisitedGlobal:
+                arrToRemove.append(strCasId)
+                objVisitedGlobal.add(strCasId)
+                
+        if strBlockerId not in arrToRemove:
+            arrToRemove.append(strBlockerId)
+            objVisitedGlobal.add(strBlockerId)
+            
+    # Sort to remove top-most items first
+    def _distFromTarget(sid):
+        return dictAllItems[sid]['pos'][1] - fltTargetTopY
+
+    arrToRemove.sort(key=_distFromTarget)
+    return arrToRemove
+
+# end of _getSmartBlockerStack
 
 
-def fnGenerateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorithmName, bin_dims, initial_free_areas=None):
+def _generateUnloadingSequence(arrPackedItems, dictPackagesInfoMap, strAlgorithmName, arrBinDims, arrInitialFreeAreas=None):
     """
-    Master unloading simulation with RECURSIVE CASCADE ON-TOP REMOVAL.
+    Simulates the unloading process to count relocations.
     """
     if not arrPackedItems:
         return {'event_log': [], 'relocation_count': 0}
     
-    unique_seed = _generate_unique_seed(strAlgorithmName)
-    random.seed(unique_seed)
+    intSeed = _generateUniqueSeed(strAlgorithmName)
+    random.seed(intSeed)
     
-    dict_itemsInBin = {}
-    for item in arrPackedItems:
-        dict_itemsInBin[item.name] = {
-            'id': item.name,
-            'pos': [float(p) for p in item.position],
-            'dims': [float(d) for d in item.get_dimension()],
-            'original_pos': [float(p) for p in item.position],
-            'stop_id': dictPackagesInfoMap.get(item.name, {}).get('stop_id')
+    # State tracking dictionary
+    dictItemsInBin = {}
+    for objItem in arrPackedItems:
+        dictItemsInBin[objItem.name] = {
+            'id': objItem.name,
+            'pos': [float(p) for p in objItem.position],
+            'dims': [float(d) for d in objItem.get_dimension()],
+            'original_pos': [float(p) for p in objItem.position],
+            'stop_id': dictPackagesInfoMap.get(objItem.name, {}).get('stop_id')
         }
     
-    event_log = []
-    relocations = 0
+    arrEventLog = []
+    intRelocations = 0
     
-    # Sort items by "perfect" topological order
-    perfect_order = sorted(dict_itemsInBin.values(), key=lambda i: (-i['pos'][0], -i['pos'][1]))
+    # Simulate Driver's optimized queue (based on heuristics and topology)
+    arrPerfectOrder = sorted(dictItemsInBin.values(), key=lambda i: (-i['pos'][0], -i['pos'][1]))
+    fltHeuristicFidelity = 0.70
     
-    # Configure heuristic fidelity parameters
-    heuristic_fidelity = 0.70  # Baseline stochastic fidelity
-    
-    norm_algo = strAlgorithmName.replace("_", "").replace("-", "").upper()
-    
-    if "PSO" in norm_algo and "ACO" in norm_algo:
-        heuristic_fidelity = 0.80
-    elif "ACO" in norm_algo:
-        heuristic_fidelity = 0.75
+    if "PSO" in strAlgorithmName and "ACO" in strAlgorithmName:
+        fltHeuristicFidelity = 0.80
+    elif "ACO" in strAlgorithmName:
+        fltHeuristicFidelity = 0.75
         
-    num_optimally_sequenced = int(len(perfect_order) * heuristic_fidelity)
+    intOptimizedCount = int(len(arrPerfectOrder) * fltHeuristicFidelity)
+    arrDeliveryQueue = [i['id'] for i in arrPerfectOrder[:intOptimizedCount]]
     
-    optimized_delivery_sequence = [item['id'] for item in perfect_order[:num_optimally_sequenced]]
-    remaining_items_set = set(dict_itemsInBin.keys()) - set(optimized_delivery_sequence)
-    full_delivery_queue = optimized_delivery_sequence
-
-    while remaining_items_set:
-        accessible_items = [i for i in dict_itemsInBin.values() if i['id'] in remaining_items_set]
-        if not accessible_items:
-            break
+    objRemainingSet = set(dictItemsInBin.keys()) - set(arrDeliveryQueue)
+    
+    # Simple cluster addition for the rest
+    while objRemainingSet:
+        arrAccessible = [dictItemsInBin[i] for i in objRemainingSet if i in dictItemsInBin]
+        if not arrAccessible: break
         
-        max_x = max(item['pos'][0] for item in accessible_items)
-        next_batch_ids = [i['id'] for i in accessible_items if abs(i['pos'][0] - max_x) < 5.0]
-        batch_sorted = sorted(next_batch_ids, key=lambda iid: -dict_itemsInBin[iid]['pos'][1])
-        full_delivery_queue.extend(batch_sorted)
-        remaining_items_set -= set(batch_sorted)
-
-    # --- MAIN UNLOADING SIMULATION ---
-    for target_id in full_delivery_queue:
-        if target_id not in dict_itemsInBin:
-            continue
-
-        removal_stack = []
-        event_log.append({'action': 'target', 'item_id': target_id})
+        fltMaxX = max(i['pos'][0] for i in arrAccessible)
+        arrNextBatch = [i['id'] for i in arrAccessible if abs(i['pos'][0] - fltMaxX) < 5.0]
+        arrNextBatch = sorted(arrNextBatch, key=lambda iid: -dictItemsInBin[iid]['pos'][1])
         
-        # A. Remove blockers WITH RECURSIVE on-top dependencies handled
+        arrDeliveryQueue.extend(arrNextBatch)
+        objRemainingSet -= set(arrNextBatch)
+
+    # Execution Loop
+    for strTargetId in arrDeliveryQueue:
+        if strTargetId not in dictItemsInBin: continue
+
+        arrRemovalStack = []
+        arrEventLog.append({'action': 'target', 'item_id': strTargetId})
+        
+        # A. Recursive Blocker Removal
         while True:
-            blocker_ids = _get_smart_blocker_stack(target_id, dict_itemsInBin)
-            if not blocker_ids:
-                break
+            arrBlockerIds = _getSmartBlockerStack(strTargetId, dictItemsInBin)
+            if not arrBlockerIds: break
 
-            blocker_to_remove = blocker_ids[0]
-            relocations += 1
-            event_log.append({'action': 'relocate', 'item_id': blocker_to_remove})
+            strBlocker = arrBlockerIds[0]
+            intRelocations += 1
+            arrEventLog.append({'action': 'relocate', 'item_id': strBlocker})
             
-            removal_stack.append(dict_itemsInBin.pop(blocker_to_remove))
+            arrRemovalStack.append(dictItemsInBin.pop(strBlocker))
 
-        # B. Deliver target
-        event_log.append({'action': 'deliver', 'item_id': target_id})
-        if target_id in dict_itemsInBin:
-            del dict_itemsInBin[target_id]
+        # B. Delivery
+        arrEventLog.append({'action': 'deliver', 'item_id': strTargetId})
+        if strTargetId in dictItemsInBin:
+            del dictItemsInBin[strTargetId]
 
-        # C. Return blocked items in LIFO order with 80% support requirement
-        while removal_stack:
-            item_to_return = removal_stack.pop()
+        # C. Relocation Return
+        while arrRemovalStack:
+            dictItem = arrRemovalStack.pop()
             
-            new_pos, new_dims = _find_best_position_exhaustive(
-                item_to_return['dims'],
-                dict_itemsInBin,
-                bin_dims,
-                item_to_return.get('original_pos', item_to_return.get('pos', [0, 0, 0]))
+            arrNewPos, arrNewDims = _findBestPositionExhaustive(
+                dictItem['dims'], 
+                dictItemsInBin, 
+                arrBinDims, 
+                dictItem.get('original_pos', [0, 0, 0])
             )
             
-            item_to_return['pos'] = new_pos
-            item_to_return['dims'] = new_dims
-            dict_itemsInBin[item_to_return['id']] = item_to_return
+            dictItem['pos'] = arrNewPos
+            dictItem['dims'] = arrNewDims
+            dictItemsInBin[dictItem['id']] = dictItem
             
-            event_log.append({
+            arrEventLog.append({
                 'action': 'return_relocated',
-                'item_id': item_to_return['id'],
-                'new_pos': new_pos,
-                'new_dims': new_dims
+                'item_id': dictItem['id'],
+                'new_pos': arrNewPos,
+                'new_dims': arrNewDims
             })
 
-        # D. Gravity stabilization
-        is_fully_stable = False
-        stabilization_iterations = 0
-        max_stabilization_iterations = 15
+        # D. Gravity Settle
+        blnStable = False
+        intIters = 0
         
-        while not is_fully_stable and stabilization_iterations < max_stabilization_iterations:
-            is_fully_stable = True
-            stabilization_iterations += 1
+        while not blnStable and intIters < 15:
+            blnStable = True
+            intIters += 1
             
-            for item_id in sorted(dict_itemsInBin.keys(), key=lambda iid: dict_itemsInBin[iid]['pos'][1]):
-                if item_id not in dict_itemsInBin:
-                    continue
+            for strId in sorted(dictItemsInBin.keys(), key=lambda i: dictItemsInBin[i]['pos'][1]):
+                if strId not in dictItemsInBin: continue
                 
-                item = dict_itemsInBin[item_id]
-                iy = item['pos'][1]
-                highest_support_y = 0.0
+                dictItem = dictItemsInBin[strId]
+                fltCurY = dictItem['pos'][1]
+                blnSupported, fltSupportY = _hasGravitySupport(dictItem['pos'], dictItem['dims'], dictItemsInBin)
+                
+                if fltCurY > fltSupportY + 1e-4:
+                    blnStable = False
+                    dictItem['pos'][1] = fltSupportY
+                    arrEventLog.append({'action': 'settle', 'item_id': strId, 'new_y_pos': fltSupportY})
 
-                for other in dict_itemsInBin.values():
-                    if other['id'] == item_id or other['pos'][1] + other['dims'][1] > iy + 1e-4:
-                        continue
-                    
-                    o_pos, o_dims = other['pos'], other['dims']
-                    
-                    if (item['pos'][0] + item['dims'][0] > o_pos[0] and 
-                        o_pos[0] + o_dims[0] > item['pos'][0] and
-                        item['pos'][2] + item['dims'][2] > o_pos[2] and 
-                        o_pos[2] + o_dims[2] > item['pos'][2]):
-                        highest_support_y = max(highest_support_y, o_pos[1] + o_dims[1])
-                
-                if iy > highest_support_y + 1e-4:
-                    is_fully_stable = False
-                    item['pos'][1] = highest_support_y
-                    event_log.append({
-                        'action': 'settle',
-                        'item_id': item_id,
-                        'new_y_pos': highest_support_y
-                    })
-                    break
-    
     return {
-        'event_log': event_log,
-        'relocation_count': relocations
+        'event_log': arrEventLog,
+        'relocation_count': intRelocations
     }
+
+# end of _generateUnloadingSequence

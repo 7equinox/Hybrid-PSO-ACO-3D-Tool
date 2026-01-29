@@ -26,7 +26,7 @@ The system executes a comparative analysis of three distinct algorithmic behavio
 The backend orchestration logic (`backend/simulation/simulation_orchestrator.py`) and metrics engine (`performance_metrics.py`) strictly adhere to the study's quantitative definitions:
 
 *   **Adjusted Volume Utilization ($VU_j$):** The software goes beyond simple bounding boxes. It detects "Fragmented Space"—irregular 3D gaps where no item can fit due to geometry (Methodology Eq 2 & 3). This penalty ensures that we measure *usable* space, not just theoretical volume.
-*   **Relocation Count:** The metric engine runs a full unloading simulation (`fnGenerateUnloadingSequence`). It employs a **Recursive Cascade Detection** logic to identify every instance where a non-target item blocks a target package. This quantifies the exact physical effort required for delivery.
+*   **Relocation Count:** The metric engine runs a full unloading simulation (`_generateUnloadingSequence`). It employs a **Recursive Cascade Detection** logic to identify every instance where a non-target item blocks a target package. This quantifies the exact physical effort required for delivery.
 *   **Scalability Metrics:** Using the `memory_profiler` library, the system tracks peak RAM usage and execution time (in seconds) to test algorithm stability as vehicle sizes increase.
 
 ### C. Data Handling Strategy

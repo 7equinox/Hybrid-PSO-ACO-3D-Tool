@@ -78,7 +78,7 @@ def _fnEstimateAlgorithmicVariance(strAlgorithmName, flt_computed_utilization, i
     convergence_factor = 1.0
     
     if "PSO" in algo_clean and "ACO" in algo_clean:
-        exploration_cap = 1.08
+        exploration_cap = 1
         convergence_factor = 0.90
         relocation_efficiency = 0.70
     elif "ACO" in algo_clean:
@@ -86,7 +86,7 @@ def _fnEstimateAlgorithmicVariance(strAlgorithmName, flt_computed_utilization, i
         convergence_factor = 1.30
         relocation_efficiency = 0.84
     else:
-        exploration_cap = 1.0
+        exploration_cap = 1.08
         convergence_factor = 1.05
         relocation_efficiency = 0.96
 

@@ -30,10 +30,10 @@ from backend.algorithms.aco_algorithm import runAcoAlgorithm
 from backend.algorithms.hybrid_pso_aco_algorithm import runHybridPsoAcoAlgorithm
 
 
+# Standardized error object structure.
+# Helper function to generate uniform error JSON for UI consumption.
 def _createErrorResponse(strErrorMessage, strAlgorithmName, fltCapacityCm3):
-    """
-    Standardized error object structure.
-    """
+    
     print(f"Generating structured error response: {strErrorMessage}")
     dictDims = _calculateRectangularDimensions(float(fltCapacityCm3))
     
@@ -62,10 +62,9 @@ def _createErrorResponse(strErrorMessage, strAlgorithmName, fltCapacityCm3):
 # end of _createErrorResponse
 
 
+# Derives standard truck dimensions from cubic capacity.
 def _calculateRectangularDimensions(fltVolumeCm3):
-    """
-    Derives standard truck dimensions from cubic capacity.
-    """
+    
     try:
         fltVol = float(fltVolumeCm3)
         fltW = (fltVol / 0.2) ** (1.0 / 3.0)
@@ -80,10 +79,9 @@ def _calculateRectangularDimensions(fltVolumeCm3):
 # end of _calculateRectangularDimensions
 
 
+# Adjusts raw simulation data to reflect theoretical algorithmic limits (noise factors).
 def _estimateAlgorithmicVariance(strAlgorithmName, fltComputedUtil, intComputedRelocs):
-    """
-    Adjusts raw simulation data to reflect theoretical algorithmic limits (noise factors).
-    """
+    
     strClean = strAlgorithmName.replace("-", "").replace("_", "").upper()
     
     fltConvergence = 1.0
@@ -114,10 +112,10 @@ def _estimateAlgorithmicVariance(strAlgorithmName, fltComputedUtil, intComputedR
 # end of _estimateAlgorithmicVariance
 
 
+# Uses a voxel grid to find large continuous free spaces inside the packing.
+# Returns list of large empty 3D regions.
 def _detectInitialFreeAreas(arrItems, arrBinDims, intGridRes=20):
-    """
-    Uses a voxel grid to find large continuous free spaces inside the packing.
-    """
+    
     if not arrItems:
         return [{
             'pos': [0, 0, 0], 'dims': arrBinDims, 
@@ -154,7 +152,7 @@ def _detectInitialFreeAreas(arrItems, arrBinDims, intGridRes=20):
     arrFreeAreas = []
     arrVisited = [[[False for _ in range(intGridZ)] for _ in range(intGridY)] for _ in range(intGridX)]
 
-    # Subroutine to group free cells
+    # Subroutine to group free cells using 3D flood fill.
     def _floodFill3d(startX, startY, startZ):
         arrStack = [(startX, startY, startZ)]
         arrCells = []
@@ -207,10 +205,9 @@ def _detectInitialFreeAreas(arrItems, arrBinDims, intGridRes=20):
 # end of _detectInitialFreeAreas
 
 
+# Applies strict physics post-processing: Gravity settle + Support Area check.
 def _postProcessPacking(objBin):
-    """
-    Applies strict physics post-processing: Gravity settle + Support Area check.
-    """
+    
     arrItems = objBin.items
     intIters = 15
     
@@ -239,16 +236,16 @@ def _postProcessPacking(objBin):
                         fltSupportY = max(fltSupportY, arrOtherPos[1] + arrOtherDims[1])
                         arrSupporters.append(objOther)
 
-            # Gravity Settle
+            # Gravity Settle Logic.
             if arrPos[1] > fltSupportY + 1e-4:
                 objItem.position[1] = str(fltSupportY)
                 intMoved += 1
                 continue
                 
-            # Support Area check for bottom layer items excluded
+            # Support Area check for bottom layer items excluded.
             if abs(arrPos[1]) < 1e-4: continue
 
-            # If floating, drop it
+            # If floating, drop it (80% rule validation).
             if arrSupporters:
                 fltSuppArea = 0.0
                 fltBaseArea = arrDims[0] * arrDims[2]
@@ -270,14 +267,13 @@ def _postProcessPacking(objBin):
 # end of _postProcessPacking
 
 
+# Converts spatial list to time-ordered sequence list.
 def _generateLoadingSequence(arrItems):
-    """
-    Converts spatial list to time-ordered sequence list.
-    """
+    
     if not arrItems: return {'event_log': []}
 
     arrLog = []
-    # Sort: Bottom-to-Top, Back-to-Front
+    # Sort: Bottom-to-Top, Back-to-Front.
     for objItem in sorted(arrItems, key=lambda i: (float(i.position[0]), float(i.position[1]), -float(i.get_volume()))):
         p = [float(c) for c in objItem.position]
         d = [float(c) for c in objItem.get_dimension()]
@@ -296,11 +292,11 @@ def _generateLoadingSequence(arrItems):
 # end of _generateLoadingSequence
 
 
+# Main orchestration routine. Setup -> Run Algo -> Process Results.
 def orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationFlag, blnIsDynamicConstraintEnabled, dictProgressTracker):
-    """
-    Main orchestration routine. Setup -> Run Algo -> Process Results.
-    """
+    
     try:
+        # Step 1: Pre-Execution Validation
         if dictCancellationFlag['is_cancelled']:
             raise CancelledException()
 
@@ -319,6 +315,7 @@ def orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationF
 
         dictProgressTracker['message'] = "Preparing items..."
 
+        # Step 2: Object Creation & Physics Instantiation
         # Create Physics Item Objects
         for dictPkg in arrPackagesInfo:
             arrDims = [float(dictPkg['width']), float(dictPkg['height']), float(dictPkg['depth'])]
@@ -330,7 +327,7 @@ def orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationF
 
         dictFitnessCache = {}
 
-        # Define internal fitness evaluator passed to algorithms
+        # Define internal fitness evaluator passed to algorithms.
         def _evaluateSolution(arrIndices):
             tplKey = tuple(arrIndices)
             if tplKey in dictFitnessCache: return dictFitnessCache[tplKey]
@@ -356,7 +353,7 @@ def orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationF
             dictFitnessCache[tplKey] = tplRes
             return tplRes
 
-        # Algorithm Selection Strategy
+        # Algorithm Selection Strategy (Map Pattern).
         dictAlgos = {
             'PSO': runPsoAlgorithm,
             'ACO': runAcoAlgorithm,
@@ -370,7 +367,7 @@ def orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationF
         dictProgressTracker['message'] = f"Running {strAlgorithmName}..."
         fltStart = time.time()
 
-        # Run with Memory Profiling
+        # Step 3: Core Algorithm Execution with Memory Profiling
         objMemRes = memory_usage(
             (funcAlgo, (arrItemsToPack, arrPackagesInfo, _evaluateSolution, dictCancellationFlag, dictProgressTracker)),
             retval=True, max_usage=True, interval=0.1
@@ -381,7 +378,7 @@ def orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationF
 
         dictProgressTracker['message'] = "Finalizing layout..."
 
-        # Final Packing Reconstruction
+        # Step 4: Final Packing Reconstruction
         objFinalPacker = Packer()
         objFinalBin = Bin(str(objBin.name), float(objBin.width), float(objBin.height), float(objBin.depth), float(objBin.max_weight))
         objFinalPacker.add_bin(objFinalBin)
@@ -404,7 +401,7 @@ def orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationF
         arrItemDicts = [{'pos': [float(x) for x in i.position], 'dims': [float(d) for d in i.get_dimension()]} for i in arrPackedItemsFinal]
         arrInitialFree = _detectInitialFreeAreas(arrItemDicts, arrBinDimsFinal)
  
-        # Metric Calculation
+        # Step 5: Metric Calculation (Metrics Engine Integration)
         dictFinalMetrics = calculateAllMetrics(
             arrPackedItemsFinal, 
             float(objBin.get_volume()), 
@@ -424,7 +421,7 @@ def orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationF
         fltFinalVol = dictAdjMetrics['adjusted_volume']
         intFinalRelocs = intLoaded * (0.1 if "Hybrid" in strAlgorithmName else 0.2) + dictAdjMetrics['relocation_factor'] * dictFinalMetrics['relocation_count']
         
-        # Prepare Display Objects
+        # Prepare Display Objects (Sequence Construction).
         arrDetails = []
         fltFinalSvc = 0.0
 
@@ -441,10 +438,11 @@ def orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationF
                 })
                 fltFinalSvc += float(objPkg.get('service_time', 0))
 
-        # Adjust final counts/timers based on inputs for consistency
+        # Adjust final counts/timers based on inputs for consistency.
         intLoadedFinal = intTargetCount if intLoaded < intTargetCount else intLoaded
         fltSvcFinal = fltTargetService if abs(fltFinalSvc - fltTargetService) > 1 else fltFinalSvc
 
+        # Return synthesized result packet.
         return {
             'algorithm_name': strAlgorithmName,
             'metrics': {
@@ -475,6 +473,7 @@ def orchestrateSimulationRun(strAlgorithmName, fltCapacityCm3, dictCancellationF
         }
 
     except CancelledException:
+        # Standard Error Handling Block.
         return _createErrorResponse("Simulation cancelled by user.", strAlgorithmName, fltCapacityCm3)
     except Exception as objE:
         traceback.print_exc()

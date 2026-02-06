@@ -26,22 +26,23 @@ from backend.simulation.custom_exceptions import CancelledException
 
 # --- GLOBAL CONSTANTS ---
 G_STR_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Constants describing path locations to strict dataset inputs
 G_STR_ROUTE_DATA_PATH = os.path.join(G_STR_BASE_DIR, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_route_data.json')
 G_STR_PACKAGE_DATA_PATH = os.path.join(G_STR_BASE_DIR, '../almrrc2021/almrrc2021-data-evaluation/model_apply_inputs/eval_package_data.json')
 G_STR_DATA_CACHE_DIR = os.path.join(G_STR_BASE_DIR, '../', 'data_cache')
 
-# Ensure cache directory exists
+# Ensure cache directory exists at runtime
 os.makedirs(G_STR_DATA_CACHE_DIR, exist_ok=True)
 
-# Default flag for optional arguments
+# Default flag for optional arguments to allow safe interruptions
 DEFAULT_CANCEL_FLAG = {'is_cancelled': False}
 
 
+# Loads raw JSON files into memory. 
+# Checks cancellation flag between heavy I/O operations to prevent hanging.
+# Returns: tuple (objRouteDataFrame, dictPackageData)
 def _loadSourceDataset(dictCancellationFlag=DEFAULT_CANCEL_FLAG):
-    """
-    Loads raw JSON files into memory. 
-    Checks cancellation flag between heavy I/O operations.
-    """
+    
     if dictCancellationFlag['is_cancelled']:
         raise CancelledException()
 
@@ -64,14 +65,13 @@ def _loadSourceDataset(dictCancellationFlag=DEFAULT_CANCEL_FLAG):
 # end of _loadSourceDataset
 
 
+# Extracts all unique vehicle capacity values from the dataset to populate UI.
+# This function is Optimized for memory management by manually invoking garbage collection.
 def getAllVehicleCapacities():
-    """
-    Extracts all unique vehicle capacity values from the dataset to populate UI.
-    Optimized for memory management.
-    """
+    
     objRouteDataFrame, _ = _loadSourceDataset()
     
-    # Extract unique values and drop nulls.
+    # Extract unique values and drop nulls from dataframe column.
     arrCapacities = objRouteDataFrame['executor_capacity_cm3'].dropna().unique()
 
     # Manual memory cleanup.
@@ -86,11 +86,10 @@ def getAllVehicleCapacities():
 # end of getAllVehicleCapacities
 
 
+# Finds or creates a cached route file for the specific capacity.
+# Searches for the first valid route if no cache exists in the 'data_cache' folder.
 def _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFAULT_CANCEL_FLAG):
-    """
-    Finds or creates a cached route file for the specific capacity.
-    Searches for the first valid route if no cache exists.
-    """
+    
     if dictCancellationFlag['is_cancelled']:
         raise CancelledException()
 
@@ -104,6 +103,7 @@ def _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFAUL
             return json.load(fileObject)
 
     # --- THE SLOW PATH: Generate cache ---
+    # This block executes only if cache is missing.
     if dictCancellationFlag['is_cancelled']:
         raise CancelledException()
 
@@ -111,11 +111,12 @@ def _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFAUL
     
     objRouteDataFrameCache, dictPackageDataCache = _loadSourceDataset(dictCancellationFlag)
 
-    # Filter routes matching capacity.
+    # Filter routes matching the target capacity.
     objMatchingRoutes = objRouteDataFrameCache[
         objRouteDataFrameCache['executor_capacity_cm3'] == fltVehicleCapacityCm3
     ]
 
+    # Handle case where no routes match.
     if objMatchingRoutes.empty:
         del objRouteDataFrameCache, dictPackageDataCache
         gc.collect()
@@ -125,6 +126,7 @@ def _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFAUL
     
     # Iterate through potential routes to find one with valid packages.
     for intIndex, strRouteId in enumerate(arrRouteIds):
+        # Check cancellation periodically.
         if intIndex % 50 == 0 and dictCancellationFlag['is_cancelled']:
              raise CancelledException()
 
@@ -157,7 +159,7 @@ def _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFAUL
 
         fltTotalVolume = sum(p['volume'] for p in arrPackagesForThisRoute)
         
-        # Validation Criterion: Must have packages and fit in truck.
+        # Validation Criterion: Must have packages and fit in truck (Valid Constraints).
         if 0 < fltTotalVolume < fltVehicleCapacityCm3:
             print(f"Found and caching valid display route: {strRouteId}")
 
@@ -195,10 +197,9 @@ def _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag=DEFAUL
 # end of _getOrCreateCapacityCache
 
 
+# Public interface to retrieve cached data for display in the UI.
 def getDisplayDataForVehicle(fltVehicleCapacityCm3, dictCancellationFlag=DEFAULT_CANCEL_FLAG):
-    """
-    Public interface to retrieve cached data for display in the UI.
-    """
+    
     print(f"Loading display data for capacity: {fltVehicleCapacityCm3}")
     
     dictCachedData = _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag)
@@ -211,11 +212,10 @@ def getDisplayDataForVehicle(fltVehicleCapacityCm3, dictCancellationFlag=DEFAULT
 # end of getDisplayDataForVehicle
 
 
+# Public interface to retrieve cached data for the simulation engine.
+# Ensures data consistency between UI and Simulation.
 def getSimulationDataForVehicle(fltVehicleCapacityCm3, dictCancellationFlag=DEFAULT_CANCEL_FLAG):
-    """
-    Public interface to retrieve cached data for the simulation engine.
-    Ensures data consistency between UI and Simulation.
-    """
+    
     print(f"Loading simulation data for capacity: {fltVehicleCapacityCm3}")
     
     dictCachedData = _getOrCreateCapacityCache(fltVehicleCapacityCm3, dictCancellationFlag)

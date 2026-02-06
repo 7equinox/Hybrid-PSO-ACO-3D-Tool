@@ -1,17 +1,17 @@
 """
-System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
-Module Name: Proposed Hybrid PSO-ACO Algorithm
-
-Purpose of this file:
-Implements Figure 7 architecture. Embeds ACO Pheromone Matrix update
-within the PSO velocity calculation to guide swarms out of local optima.
-
-Author/s:
-ALFARO, ABRAM S.
-BUNAO, JOHN GLAY C.
-DELA CRUZ, JUAN GABRIEL D.
-ERFE, JEFFERSON B.
-ESTONILO, JULIUS EVAN C.
+*System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
+*Module Name: Proposed Hybrid PSO-ACO Algorithm
+*
+*Purpose of this file:
+*Implements Figure 8 architecture. Embeds ACO Pheromone Matrix update
+*within the PSO velocity calculation to guide swarms out of local optima.
+*
+*Author/s:
+*ALFARO, ABRAM S.
+*BUNAO, JOHN GLAY C.
+*DELA CRUZ, JUAN GABRIEL D.
+*ERFE, JEFFERSON B.
+*ESTONILO, JULIUS EVAN C.
 """
 
 import random
@@ -21,18 +21,18 @@ from .base_algorithm import creator
 from backend.simulation.custom_exceptions import CancelledException
 
 
+# Execute Hybrid PACO algorithm.
+# Combines Swarm intelligence with Pheromone feedback for velocity updates.
 def runHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, dictCancellationFlag, dictProgressTracker,
                                 intNumParticles=10, intMaxGenerations=10, fltEvaporationRate=0.2):
-    """
-    Execute Hybrid PACO algorithm.
-    """
+    
     intNumItems = len(arrItems)
     dictProgressTracker['total'] = intMaxGenerations
     
     arrServiceTimes = np.array([p.get('service_time', 1) for p in arrPackagesInfo])
     arrServiceTimes[arrServiceTimes == 0] = 1
 
-    # Hybrid Init
+    # Hybrid Initialization
     objToolbox = base.Toolbox()
     objToolbox.register("permutation", random.sample, range(intNumItems), intNumItems)
     objToolbox.register("particle", tools.initIterate, creator.Particle, objToolbox.permutation)
@@ -48,12 +48,13 @@ def runHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, di
                          arrServiceTimes=arrServiceTimes, fltPhi1=1.5, fltPhi2=1.5, fltPhi3=2.0, fltPhi4=1.5)
 
     try:
+        # Main Generation Loop
         for intGen in range(intMaxGenerations):
             dictProgressTracker['current'] = intGen + 1
             if dictCancellationFlag['is_cancelled']: raise CancelledException()
             print(f"Hybrid PSO-ACO Generation: {intGen + 1}/{intMaxGenerations}")
 
-            # Standard PSO Eval
+            # Standard PSO Evaluation Phase
             for objParticle in arrSwarm:
                 if not objParticle.fitness.valid:
                     objParticle.fitness.values = objToolbox.evaluate(objParticle)
@@ -65,6 +66,7 @@ def runHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, di
                     objGbest.fitness.values = objParticle.fitness.values
             
             # Hybrid Step: Weighted Pheromone Update
+            # only the elite particles are allowed to deposit pheromones
             arrPheromones *= (1 - fltEvaporationRate)
             
             arrSortedSwarm = sorted(arrSwarm, key=lambda p: float(p.fitness.values[0]) + float(p.fitness.values[1]))
@@ -78,7 +80,7 @@ def runHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, di
                     for i in range(intNumItems - 1):
                         arrPheromones[objElite[i]][objElite[i+1]] += fltDeposit
 
-            # Hybrid Velocity Update
+            # Hybrid Velocity Update Phase
             for objParticle in arrSwarm:
                  objToolbox.update(objParticle, objGbest)
 
@@ -93,13 +95,14 @@ def runHybridPsoAcoAlgorithm(arrItems, arrPackagesInfo, funcEvaluateSolution, di
 # end of runHybridPsoAcoAlgorithm
 
 
+# Apply Hybrid Swaps: Cognitive + Social + Pheromone-Guided + Heuristic.
+# The third parameter integrates the pheromone matrix into the velocity.
 def _updateParticleHybrid(objParticle, objGbest, arrPheromones, arrServiceTimes, fltPhi1, fltPhi2, fltPhi3, fltPhi4):
-    """
-    Apply Hybrid Swaps: Cognitive + Social + Pheromone-Guided + Heuristic.
-    """
+    
     intNumItems = len(objParticle)
     if intNumItems <= 1: return
 
+    # Cognitive Component
     arrPbestSwaps = []
     if hasattr(objParticle, 'pbest') and objParticle.pbest:
         arrPbestDiff = [i for i in range(intNumItems) if i < len(objParticle.pbest) and objParticle[i] != objParticle.pbest[i]]
@@ -107,6 +110,7 @@ def _updateParticleHybrid(objParticle, objGbest, arrPheromones, arrServiceTimes,
             intSwaps = int(fltPhi1 * random.random() * len(arrPbestDiff) / 2)
             arrPbestSwaps.extend(tuple(random.sample(arrPbestDiff, 2)) for _ in range(intSwaps))
 
+    # Social Component
     arrGbestSwaps = []
     if objGbest:
         arrGbestDiff = [i for i in range(intNumItems) if i < len(objGbest) and objParticle[i] != objGbest[i]]
@@ -114,7 +118,8 @@ def _updateParticleHybrid(objParticle, objGbest, arrPheromones, arrServiceTimes,
             intSwaps = int(fltPhi2 * random.random() * len(arrGbestDiff) / 2)
             arrGbestSwaps.extend(tuple(random.sample(arrGbestDiff, 2)) for _ in range(intSwaps))
 
-    # PHEROMONE-GUIDED
+    # PHEROMONE-GUIDED SWAP
+    # Guides the particle using the global knowledge stored in the matrix
     arrPhSwaps = []
     intPhSwaps = int(fltPhi3 * random.random())
     for _ in range(intPhSwaps):
@@ -132,7 +137,7 @@ def _updateParticleHybrid(objParticle, objGbest, arrPheromones, arrServiceTimes,
                 intOriginalPos = objParticle.index(intBestNext)
                 arrPhSwaps.append(tuple(sorted((intPos + 1, intOriginalPos))))
 
-    # Heuristic
+    # Heuristic Component
     arrHeuristicSwaps = []
     intHeuristicSwaps = int(fltPhi4 * random.random())
     for _ in range(intHeuristicSwaps):
@@ -141,7 +146,7 @@ def _updateParticleHybrid(objParticle, objGbest, arrPheromones, arrServiceTimes,
         if arrServiceTimes[objParticle[intIdx1]] > arrServiceTimes[objParticle[intIdx2]]:
              arrHeuristicSwaps.append(tuple(sorted((intIdx1, intIdx2))))
             
-    # Apply
+    # Apply Final Swap Set
     arrAllSwaps = list(set(arrPbestSwaps + arrGbestSwaps + arrPhSwaps + arrHeuristicSwaps))
     for i, j in arrAllSwaps:
         objParticle[i], objParticle[j] = objParticle[j], objParticle[i]

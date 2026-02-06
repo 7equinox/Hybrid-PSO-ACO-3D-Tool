@@ -1,21 +1,22 @@
 /*
-System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
-Module Name: Frontend Styles
-
-Purpose of this file:
-Cascading Style Sheets determining the layout, fonts, and responsive behavior.
-Strictly adheres to styling components described in requirements.
-
-Author/s:
-ALFARO, ABRAM S.
-BUNAO, JOHN GLAY C.
-DELA CRUZ, JUAN GABRIEL D.
-ERFE, JEFFERSON B.
-ESTONILO, JULIUS EVAN C.
+* System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
+* Module Name: Frontend Styles
+*
+* Purpose of this file:
+* Cascading Style Sheets determining the layout, fonts, and responsive behavior.
+* Strictly adheres to styling components described in requirements.
+*
+* Author/s:
+* ALFARO, ABRAM S.
+* BUNAO, JOHN GLAY C.
+* DELA CRUZ, JUAN GABRIEL D.
+* ERFE, JEFFERSON B.
+* ESTONILO, JULIUS EVAN C.
 */
 
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700&display=swap');
 
+/* --- GLOBAL RESET & TYPOGRAPHY --- */
 * {
     box-sizing: border-box;
     font-family: "Poppins", sans-serif;
@@ -38,9 +39,10 @@ h3 {
 }
 
 .label {
-    color: #e08128;
+    color: #e08128; /* Accent orange for labels */
 }
 
+/* --- HEADER SECTION --- */
 .main-header {
     background-color: #121212;
     color: white;
@@ -49,17 +51,20 @@ h3 {
     position: relative;
     box-shadow: 0 4px 8px rgba(0,0,0,0.2);
 }
+
 .main-header h1 {
     color: #e08128;
     font-size: 36px;
     font-weight: 700;
 }
+
 .main-header h2 {
     font-size: 16px;
     font-weight: 400;
     color: #d1d1d1;
 }
 
+/* --- MAIN LAYOUT STRUCTURE --- */
 .container {
     display: flex;
     margin: 30px auto; 
@@ -75,7 +80,7 @@ h3 {
 }
 
 .right-section {
-    background-color: #121212;
+    background-color: #121212; /* Dark Theme for results panel */
     border-radius: 25px;
     color: white;
     flex: 1;
@@ -84,6 +89,7 @@ h3 {
     min-width: 300px;
 }
 
+/* --- DATA & DISPLAY COMPONENTS --- */
 .dataset-title {
     font-size: 20px;
     font-weight: 700;
@@ -108,13 +114,14 @@ h3 {
 .banners {
     display: grid;
     gap: 20px;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, 1fr); /* 2x2 grid for stats */
 }
 
 .content-block {
     margin-top: 30px;
 }
 
+/* Color schemes for light vs dark panels */
 .white-bg {
     background-color: #ffffff;
     border: 1px solid #e0e0e0;
@@ -130,6 +137,7 @@ h3 {
     padding: 15px;
 }
 
+/* --- METRICS GRID --- */
 .metrics {
     display: grid;
     grid-template-columns: repeat(1, 1fr);
@@ -145,6 +153,7 @@ h3 {
     justify-content: space-between;
 }
 
+/* --- BUTTONS & CONTROLS --- */
 .settings {
     align-items: center;
     background-color: #343434;
@@ -176,13 +185,16 @@ h3 {
     font-weight: 500;
     transition: background-color 0.2s;
 }
+
 .guides-btn:hover {
     background-color: #d1d1d1;
 }
+
 .guides-btn i {
     color: #e08128;
 }
 
+/* --- DROPDOWN MENUS --- */
 .visualize-menu {
     position: relative;
     display: inline-block;
@@ -204,17 +216,21 @@ h3 {
     height: 40px;
     white-space: nowrap;
 }
+
 .visualize-btn:hover {
     background-color: #90541c;
 }
+
 .visualize-btn:disabled {
     background-color: #555;
     cursor: not-allowed;
     color: #999;
 }
+
 .visualize-btn:disabled i.fa-caret-down {
     color: #999;
 }
+
 .visualize-btn i.fa-cube {
     font-size: 16px;
 }
@@ -238,13 +254,16 @@ h3 {
     display: block;
     font-size: 14px;
 }
+
 .visualize-dropdown-content a:hover {
     background-color: #555555;
 }
+
 .show-dropdown {
     display: block;
 }
 
+/* --- TABLE STYLING --- */
 .table {
     margin-top: 10px;
     max-height: 725px;
@@ -270,7 +289,7 @@ h3 {
     border-collapse: collapse;
     table-layout: fixed;
     width: 100%;
-    min-width: 970px;
+    min-width: 970px; /* Prevent crunching of columns */
 }
 
 th {
@@ -294,6 +313,7 @@ td:not(:first-child) {
 .custom-table th:last-child, .custom-table td:last-child { border-right: none; }
 .custom-table.gray-border th, .custom-table.gray-border td { border-color: #f5f5f5; }
 
+/* --- MODAL BASE --- */
 .modal {
     align-items: center;
     background: rgba(0, 0, 0, 0.7);
@@ -336,6 +356,7 @@ td:not(:first-child) {
     to { opacity: 1; transform: translateY(0); }
 }
 
+/* --- CONFIGURATION MODAL SPECIFIC --- */
 .modal-options {
     display: grid;
     gap: 20px;
@@ -362,7 +383,7 @@ td:not(:first-child) {
 }
 
 .modal-options .active {
-    background-color: #90541c;
+    background-color: #90541c; /* Highlight active algorithm */
     color: #ffffff;
 }
 
@@ -452,11 +473,13 @@ select.currency-select option:hover {
     color: #121212;
     border-color: #ccc;
 }
+
 #cancel-load-btn:hover,
 #cancel-sim-btn:hover {
     background-color: #e0e0e0;
 }
 
+/* Toggle Switch Components */
 .toggle-switch-container {
     display: flex;
     justify-content: space-between;
@@ -467,6 +490,7 @@ select.currency-select option:hover {
     border-radius: 10px;
     border: 1px solid #393939;
 }
+
 .switch {
     position: relative;
     display: inline-block;
@@ -474,11 +498,13 @@ select.currency-select option:hover {
     height: 34px;
     flex-shrink: 0;
 }
+
 .switch input { 
     opacity: 0;
     width: 0;
     height: 0;
 }
+
 .slider {
     position: absolute;
     cursor: pointer;
@@ -490,6 +516,7 @@ select.currency-select option:hover {
     -webkit-transition: .4s;
     transition: .4s;
 }
+
 .slider:before {
     position: absolute;
     content: "";
@@ -501,24 +528,30 @@ select.currency-select option:hover {
     -webkit-transition: .4s;
     transition: .4s;
 }
+
 input:checked + .slider {
     background-color: #e08128;
 }
+
 input:focus + .slider {
     box-shadow: 0 0 1px #e08128;
 }
+
 input:checked + .slider:before {
     -webkit-transform: translateX(26px);
     -ms-transform: translateX(26px);
     transform: translateX(26px);
 }
+
 .slider.round {
     border-radius: 34px;
 }
+
 .slider.round:before {
     border-radius: 50%;
 }
 
+/* --- GUIDE MODAL STYLES --- */
 .guides-content {
     max-width: 1200px;
     text-align: left;
@@ -526,30 +559,37 @@ input:checked + .slider:before {
     overflow-y: auto;
     max-height: 90vh;
 }
+
 .guides-content h2 {
     text-align: center;
     margin-bottom: 10px;
 }
+
 .guides-intro {
     text-align: center;
     color: #d1d1d1;
     margin-bottom: 25px;
 }
+
 .guides-list {
     list-style-position: inside;
     margin-left: 10px;
 }
+
 .guides-list li {
     margin-bottom: 20px;
 }
+
 .guides-list li p {
     color: #b0b0b0;
     margin-left: 25px;
     margin-top: 5px;
 }
+
 .guides-list li i {
     color: #e08128;
 }
+
 .got-it-btn {
     display: block;
     margin: 25px auto 0 auto;
@@ -562,14 +602,17 @@ input:checked + .slider:before {
     cursor: pointer;
     text-transform: uppercase;
 }
+
 .got-it-btn:hover {
     background-color: #90541c !important;
 }
+
 .guides-content .highlight-text {
     color: #e08128;
     font-weight: 500;
 }
 
+/* --- LOADER STYLES --- */
 .loader-content {
     display: flex;
     flex-direction: column;
@@ -577,12 +620,16 @@ input:checked + .slider:before {
     justify-content: center;
 }
 
+/* Scrollbar customization for webkit browsers */
 .table::-webkit-scrollbar { width: 8px; height: 8px; }
 .table::-webkit-scrollbar-track { background-color: #f5f5f5; border-radius: 10px; }
 .table::-webkit-scrollbar-thumb { background-color: #555555; border-radius: 10px; }
 .table.gray-bg::-webkit-scrollbar-track { background-color: #252525; }
 .table.gray-bg::-webkit-scrollbar-thumb { background-color: #f5f5f5; }
 
+/* --- RESPONSIVE DESIGN --- */
+
+/* Medium Screens (Laptops/Tablets) */
 @media (max-width: 1280px) {
     .container {
         flex-direction: column;
@@ -595,8 +642,9 @@ input:checked + .slider:before {
         padding-left: 15px;
         padding-right: 15px;
     }
-}
+} /* End of @media max-width 1280px */
 
+/* Mobile Screens */
 @media (max-width: 768px) {
     .main-header {
         padding: 15px;
@@ -652,4 +700,4 @@ input:checked + .slider:before {
     .toggle-switch-container .label {
         font-size: 14px;
     }
-}
+} /* End of @media max-width 768px */

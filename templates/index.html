@@ -1,17 +1,17 @@
 <!--
-System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
-Module Name: Frontend User Interface
-
-Purpose of this file:
-Main UI structure. Contains data panels, configuration modals, and result views.
-References updated stylesheets and scripts.
-
-Author/s:
-ALFARO, ABRAM S.
-BUNAO, JOHN GLAY C.
-DELA CRUZ, JUAN GABRIEL D.
-ERFE, JEFFERSON B.
-ESTONILO, JULIUS EVAN C.
+* System Name: ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)
+* Module Name: Frontend User Interface
+*
+* Purpose of this file:
+* Main UI structure. Contains data panels, configuration modals, and result views.
+* References updated stylesheets and scripts.
+*
+* Author/s:
+* ALFARO, ABRAM S.
+* BUNAO, JOHN GLAY C.
+* DELA CRUZ, JUAN GABRIEL D.
+* ERFE, JEFFERSON B.
+* ESTONILO, JULIUS EVAN C.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -20,28 +20,35 @@ ESTONILO, JULIUS EVAN C.
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ASPECT (Algorithm System for Packing Efficiency Comparison and Testing)</title>
 
+    <!-- External and Static Resources -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     
+    <!-- 3D Library Reference -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
+    <!-- Main Navigation / Header Bar -->
     <header class="main-header">
         <h1>ASPECT</h1>
         <h2>Algorithm System for Packing Efficiency Comparison and Testing</h2>
+        
+        <!-- Button to trigger the User Guide Modal -->
         <div id="openGuidesBtn" class="guides-btn">
             <i class="fa-solid fa-book-open"></i>
             <span>User Guide</span>
         </div>
-    </header>
+    </header> <!-- End of main-header -->
 
+    <!-- Main Content Container -->
     <div class="container">
 
-        <!-- LEFT PANEL -->
+        <!-- LEFT PANEL: Displays Initial Data & Item Manifest -->
         <div class="left-section">
             <h2 class="dataset-title">2021 Amazon Last Mile Routing Research Challenge Dataset</h2>
             
+            <!-- Statistical Summary Cards -->
             <div class="banners">
                 <div class="white-bg">
                     <p class="label">Vehicle Volume Capacity (cm³)</p>
@@ -59,8 +66,9 @@ ESTONILO, JULIUS EVAN C.
                     <p class="label">Total Product Service Time (s)</p>
                     <h2 id="initial-service-time">0</h2>
                 </div>
-            </div>
+            </div> <!-- End of banners -->
 
+            <!-- Scrollable Table for Loaded Items -->
             <div class="content-block">
                 <p class="label">Selected Items</p>
                 <div class="table white-bg">
@@ -75,28 +83,36 @@ ESTONILO, JULIUS EVAN C.
                                 <th style="width: 130px;">Width (cm)</th>
                             </tr>
                         </thead>
-                        <tbody id="initial-item-table-body"></tbody>
+                        <tbody id="initial-item-table-body">
+                            <!-- JS populates rows here -->
+                        </tbody>
                     </table>
+                    <!-- Placeholder text when data is not yet loaded -->
                     <p id="initial-no-item" class="no-item">SELECT VEHICLE</p>
-                </div>
-            </div>
-        </div> 
+                </div> <!-- End of table wrapper -->
+            </div> <!-- End of content-block -->
+        </div> <!-- End of left-section -->
 
-        <!-- RIGHT PANEL -->
+        <!-- RIGHT PANEL: Displays Simulation Results & Controls -->
         <div class="right-section">
 
+            <!-- Trigger for Configuration Modal -->
             <div id="openModalBtn" class="settings">
                 <i class="fa-solid fa-gear"></i>
                 <p>Modify Simulation</p>
             </div>
             
+            <!-- Simulation Output Area -->
             <div class="results-panel-content">
+                
+                <!-- Algorithm Header & Visualization Controls -->
                 <div class="algorithm-header">
                     <div class="algorithm-title-group">
                         <p class="label">Algorithm</p>
                         <h2 id="result-algorithm-name">*Algorithm Name*</h2>
                     </div>
                     
+                    <!-- Hidden by default; displayed after successful simulation -->
                     <div id="visualize-menu" class="visualize-menu" style="display: none;">
                         <button id="visualize-menu-btn" class="visualize-btn">
                             <i class="fa-solid fa-cube"></i>
@@ -108,9 +124,10 @@ ESTONILO, JULIUS EVAN C.
                             <a href="#" id="viz-load-anim-btn">Animate Loading</a>
                             <a href="#" id="viz-unload-anim-btn">Animate Unloading</a>
                         </div>
-                    </div>
-                </div>
+                    </div> <!-- End of visualize-menu -->
+                </div> <!-- End of algorithm-header -->
 
+                <!-- Result Statistics Banners -->
                 <div class="banners">
                     <div class="gray-bg">
                         <p class="label">Vehicle Volume Capacity (cm³)</p>
@@ -128,8 +145,9 @@ ESTONILO, JULIUS EVAN C.
                         <p class="label">Total Product Service Time (s)</p>
                         <h2 id="result-service-time">0</h2>
                     </div>
-                </div>
+                </div> <!-- End of banners -->
 
+                <!-- Detailed Metrics Grid -->
                 <div class="metrics">
                     <div class="content-block">
                         <p class="label">Scalability Metrics</p>
@@ -157,8 +175,9 @@ ESTONILO, JULIUS EVAN C.
                             </div>
                         </div>
                     </div>
-                </div>
+                </div> <!-- End of metrics -->
 
+                <!-- Table for Packed Results -->
                 <div class="content-block">
                     <p class="label">Packed Items</p>
                     <div class="table gray-bg">
@@ -173,26 +192,30 @@ ESTONILO, JULIUS EVAN C.
                                     <th style="width: 130px;">Width (cm)</th>
                                 </tr>
                             </thead>
-                            <tbody id="result-item-table-body"></tbody>
+                            <tbody id="result-item-table-body">
+                                <!-- JS populates results here -->
+                            </tbody>
                         </table>
                         <p id="result-no-item" class="no-item">NO RESULTS</p>
-                    </div>
-                </div>
-            </div> 
-        </div> 
-    </div>
+                    </div> <!-- End of table wrapper -->
+                </div> <!-- End of content-block -->
+            </div> <!-- End of results-panel-content -->
+        </div> <!-- End of right-section -->
+    </div> <!-- End of container -->
 
-    <!-- MODAL -->
+    <!-- CONFIGURATION MODAL: Algorithm & Constraint Settings -->
     <div id="myModal" class="modal">
         <div class="modal-content">
             <i id="closeModalBtn" class="fa-solid fa-xmark"></i>
             <p class="label">Choose an Optimization Algorithm to Simulate</p>
+            
             <div class="modal-options" style="margin-bottom: 30px;">
                 <button class="active" data-algo="PSO">Particle Swarm Optimization</button>
                 <button data-algo="ACO">Ant Colony Optimization</button>
                 <button data-algo="PSO-ACO">PSO-ACO Algorithm</button>
             </div>
             
+            <!-- Capacity Selector with Flask Template Logic -->
             <p class="label">Choose Vehicle Volume Capacity (cm³)</p>
             <div class="custom-select-wrapper">
                 <select id="vehicle-capacity-select" class="currency-select" aria-label="Vehicle Capacity selection:">
@@ -213,6 +236,7 @@ ESTONILO, JULIUS EVAN C.
                 <span class="arrow"></span>
             </div>
 
+            <!-- Constraint Toggles -->
             <div class="toggle-switch-container">
                 <label for="dynamic-constraint-toggle" class="label">Enable Dynamic Constraint</label>
                 <label class="switch">
@@ -225,9 +249,10 @@ ESTONILO, JULIUS EVAN C.
                 <button id="clear-sim-btn">Clear Simulation</button>
                 <button id="run-sim-btn">Simulate</button>
             </div>
-        </div>
-    </div>
+        </div> <!-- End of modal-content -->
+    </div> <!-- End of myModal -->
     
+    <!-- GUIDES MODAL: Instructional overlay -->
     <div id="guidesModal" class="modal" style="display: flex;">
         <div class="modal-content guides-content">
             <i id="closeGuidesBtn" class="fa-solid fa-xmark"></i>
@@ -263,9 +288,10 @@ ESTONILO, JULIUS EVAN C.
                 </li>
             </ol>
              <button id="gotItBtn" class="got-it-btn">Got It!</button>
-        </div>
-    </div>
+        </div> <!-- End of modal-content (Guides) -->
+    </div> <!-- End of guidesModal -->
 
+    <!-- LOADING SPINNER: Blocks UI during async calls -->
     <div id="loader" class="modal" style="display: none; background: rgba(0, 0, 0, 0.85); color: white; font-size: 24px;">
         <div class="loader-content">
             <i class="fa-solid fa-spinner fa-spin fa-3x"></i>
@@ -273,7 +299,7 @@ ESTONILO, JULIUS EVAN C.
             <button id="cancel-load-btn" style="display: none;">Cancel Loading</button>
             <button id="cancel-sim-btn" style="display: none;">Cancel Simulation</button>
         </div>
-    </div>
+    </div> <!-- End of loader -->
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
